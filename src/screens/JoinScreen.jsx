@@ -16,8 +16,8 @@ export default function JoinScreen({ onJoin }) {
   const [adminSetup, setAdminSetup] = useState({
     adminName: '', adminPass: '',
     sessionName: 'Bokémon GO Night',
-    team1Name: 'Team Rood', team1Color: '#ef4444', team1Emoji: '🔴',
-    team2Name: 'Team Blauw', team2Color: '#3b82f6', team2Emoji: '🔵',
+    team1Name: 'Team Magma', team1Color: '#ef4444', team1Emoji: '🌋',
+    team2Name: 'Team Aqua', team2Color: '#3b82f6', team2Emoji: '🌊',
   })
 
   async function handleCodeSubmit(e) {

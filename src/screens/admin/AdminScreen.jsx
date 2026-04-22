@@ -6,7 +6,7 @@ import { supabase } from '../../lib/supabase'
 import { useGameSession } from '../../hooks/useGameSession'
 import { usePlayerLocation } from '../../hooks/usePlayerLocation'
 import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM } from '../../lib/constants'
-import { getPolygonCenter } from '../../lib/geo'
+import { getPolygonCenter, pointInPolygon } from '../../lib/geo'
 import { autoSpawnPokemon } from '../../lib/gameEngine'
 import NotificationBanner from '../../components/NotificationBanner'
 
@@ -66,6 +66,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [pokemons, setPokemons] = useState([])
   const [spawnForm, setSpawnForm] = useState({ pokemonId: '', spawnType: 'normal', requiresOpdracht: true })
   const [pendingSpawnLoc, setPendingSpawnLoc] = useState(null)
+  const [detectedBiomeType, setDetectedBiomeType] = useState(null)
   const [shopActive, setShopActive] = useState(false)
   const mapRef = useRef(null)
 
@@ -79,8 +80,23 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     })
   }, [initialSession.id])
 
+  function detectBiomeAtPoint(latlng) {
+    const biomes = areas.filter(a => a.type === 'biome')
+    for (const biome of biomes) {
+      const coords = biome.geojson?.geometry?.coordinates?.[0] || []
+      // GeoJSON is [lon, lat], pointInPolygon verwacht [lat, lon]
+      const latLngCoords = coords.map(([lon, lat]) => [lat, lon])
+      if (pointInPolygon(latlng.lat, latlng.lng, latLngCoords)) {
+        return biome.pokemon_type
+      }
+    }
+    return null
+  }
+
   function handleMapClick(latlng) {
     if (mapMode === 'spawn') {
+      const biome = detectBiomeAtPoint(latlng)
+      setDetectedBiomeType(biome)
       setPendingSpawnLoc(latlng)
     } else if (mapMode === 'boundary' || mapMode === 'biome') {
       setDrawingPoints(prev => [...prev, [latlng.lat, latlng.lng]])
@@ -391,31 +407,55 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
           </div>
 
           {/* Spawn form popup */}
-          {mapMode === 'spawn' && pendingSpawnLoc && (
-            <div style={{ position: 'absolute', top: 12, left: 12, right: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 16, zIndex: 600 }}>
-              <h3 style={{ marginBottom: 12 }}>🎯 Spawn configureren</h3>
-              <div className="field">
-                <label>Bokémon</label>
-                <select value={spawnForm.pokemonId} onChange={e => setSpawnForm(f => ({ ...f, pokemonId: e.target.value }))}>
-                  <option value="">Kies...</option>
-                  {pokemons.map(p => <option key={p.id} value={p.id}>{p.sprite_emoji} {p.name}</option>)}
-                </select>
+          {mapMode === 'spawn' && pendingSpawnLoc && (() => {
+            const biomeInfo = detectedBiomeType ? POKEMON_TYPES[detectedBiomeType] : null
+            const sortedPokemons = detectedBiomeType
+              ? [...pokemons].sort((a, b) => {
+                  if (a.pokemon_type === detectedBiomeType && b.pokemon_type !== detectedBiomeType) return -1
+                  if (b.pokemon_type === detectedBiomeType && a.pokemon_type !== detectedBiomeType) return 1
+                  return 0
+                })
+              : pokemons
+            return (
+              <div style={{ position: 'absolute', top: 12, left: 12, right: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 16, zIndex: 600 }}>
+                <h3 style={{ marginBottom: 8 }}>🎯 Spawn configureren</h3>
+                {biomeInfo && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, padding: '6px 10px', borderRadius: 99, background: biomeInfo.color + '33', border: `1px solid ${biomeInfo.color}` }}>
+                    <span style={{ fontSize: 16 }}>{biomeInfo.emoji}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: biomeInfo.color }}>{biomeInfo.label} biome — dat type staat bovenaan</span>
+                  </div>
+                )}
+                <div className="field">
+                  <label>Bokémon</label>
+                  <select value={spawnForm.pokemonId} onChange={e => setSpawnForm(f => ({ ...f, pokemonId: e.target.value }))}>
+                    <option value="">Kies...</option>
+                    {detectedBiomeType && <optgroup label={`── ${biomeInfo?.emoji} ${biomeInfo?.label} (aanbevolen) ──`} />}
+                    {sortedPokemons.map((p, i) => {
+                      const isFirstOfOtherType = detectedBiomeType && i > 0 && p.pokemon_type !== detectedBiomeType && sortedPokemons[i-1].pokemon_type === detectedBiomeType
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.sprite_emoji} {p.name}{isFirstOfOtherType ? ' ·' : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Type</label>
+                  <select value={spawnForm.spawnType} onChange={e => setSpawnForm(f => ({ ...f, spawnType: e.target.value }))}>
+                    <option value="normal">Normaal</option>
+                    <option value="shiny">✨ Shiny</option>
+                    <option value="mystery">❓ Mystery</option>
+                    <option value="legendary">👑 Legendary</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-primary btn-sm" onClick={spawnPokemon} disabled={!spawnForm.pokemonId}>✅ Spawnen</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => { setPendingSpawnLoc(null); setDetectedBiomeType(null); setMapMode('view') }}>✕</button>
+                </div>
               </div>
-              <div className="field">
-                <label>Type</label>
-                <select value={spawnForm.spawnType} onChange={e => setSpawnForm(f => ({ ...f, spawnType: e.target.value }))}>
-                  <option value="normal">Normaal</option>
-                  <option value="shiny">✨ Shiny</option>
-                  <option value="mystery">❓ Mystery</option>
-                  <option value="legendary">👑 Legendary</option>
-                </select>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-primary btn-sm" onClick={spawnPokemon} disabled={!spawnForm.pokemonId}>✅ Spawnen</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => { setPendingSpawnLoc(null); setMapMode('view') }}>✕</button>
-              </div>
-            </div>
-          )}
+            )
+          })()}
 
           {mapMode === 'biome' && (
             <div style={{ position: 'absolute', top: 12, left: 12, right: 12, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 12, zIndex: 600 }}>

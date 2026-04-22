@@ -23,7 +23,7 @@ export function useGameSession(sessionId) {
       supabase.from('game_sessions').select('*').eq('id', sessionId).single(),
       supabase.from('teams').select('*').eq('game_session_id', sessionId),
       supabase.from('players').select('*').eq('game_session_id', sessionId),
-      supabase.from('active_spawns').select('*, pokemon_definitions(*)').eq('game_session_id', sessionId).eq('status', 'active'),
+      supabase.from('active_spawns').select('*, pokemon_definitions(*)').eq('game_session_id', sessionId).in('status', ['active', 'catching']),
       supabase.from('catches').select('*, pokemon_definitions(*), teams(name,color)').eq('game_session_id', sessionId),
       supabase.from('team_inventory').select('*, item_definitions(*)').eq('game_session_id', sessionId),
       supabase.from('active_effects').select('*').eq('game_session_id', sessionId).eq('is_active', true),
