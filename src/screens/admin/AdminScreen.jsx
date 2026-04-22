@@ -64,9 +64,11 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [selectedBiomeType, setSelectedBiomeType] = useState('grass')
   const [areas, setAreas] = useState([])
   const [pokemons, setPokemons] = useState([])
-  const [spawnForm, setSpawnForm] = useState({ pokemonId: '', spawnType: 'normal', requiresOpdracht: true })
+  const [spawnForm, setSpawnForm] = useState({ pokemonId: '', spawnType: 'normal', requiresOpdracht: true, catchRadius: 50 })
   const [pendingSpawnLoc, setPendingSpawnLoc] = useState(null)
   const [detectedBiomeType, setDetectedBiomeType] = useState(null)
+  const [selectedSpawn, setSelectedSpawn] = useState(null) // spawn geselecteerd op kaart
+  const [deletingSpawn, setDeletingSpawn] = useState(false)
   const [shopActive, setShopActive] = useState(false)
   const mapRef = useRef(null)
 
@@ -135,6 +137,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       spawn_type: spawnForm.spawnType,
       cp,
       requires_opdracht: spawnForm.requiresOpdracht,
+      catch_radius_meters: spawnForm.catchRadius || 50,
       status: 'active',
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     })
@@ -357,23 +360,15 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               )
             })}
 
-            {/* Spawns */}
+            {/* Spawns — klik opent detail panel buiten Leaflet */}
             {spawns.map(spawn => {
               const pokemon = spawn.pokemon_definitions
+              const isSelected = selectedSpawn?.id === spawn.id
               return pokemon ? (
                 <Marker key={spawn.id} position={[Number(spawn.latitude), Number(spawn.longitude)]}
-                  icon={makeEmojiIcon(pokemon.sprite_emoji, 32)}>
-                  <Popup>
-                    <div className="spawn-popup">
-                      <h4>{pokemon.name}</h4>
-                      <div className="cp">{spawn.cp} CP</div>
-                      <button style={{ marginTop: 8, padding: '6px 12px', background: 'var(--danger)', border: 'none', borderRadius: 8, color: 'white', cursor: 'pointer', width: '100%', fontWeight: 700 }}
-                        onClick={() => supabase.from('active_spawns').update({ status: 'expired' }).eq('id', spawn.id)}>
-                        🗑️ Verwijderen
-                      </button>
-                    </div>
-                  </Popup>
-                </Marker>
+                  icon={makeEmojiIcon(isSelected ? '🎯' : pokemon.sprite_emoji, isSelected ? 38 : 32)}
+                  eventHandlers={{ click: () => setSelectedSpawn(selectedSpawn?.id === spawn.id ? null : spawn) }}
+                />
               ) : null
             })}
 
@@ -449,10 +444,52 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                     <option value="legendary">👑 Legendary</option>
                   </select>
                 </div>
+                <div className="field">
+                  <label>Vangst-radius (meter)</label>
+                  <input type="number" min={10} max={500} value={spawnForm.catchRadius}
+                    onChange={e => setSpawnForm(f => ({ ...f, catchRadius: Number(e.target.value) }))}
+                    style={{ width: '100%' }} />
+                </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn btn-primary btn-sm" onClick={spawnPokemon} disabled={!spawnForm.pokemonId}>✅ Spawnen</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => { setPendingSpawnLoc(null); setDetectedBiomeType(null); setMapMode('view') }}>✕</button>
                 </div>
+              </div>
+            )
+          })()}
+
+          {/* Geselecteerde spawn — detail panel onderaan */}
+          {selectedSpawn && !pendingSpawnLoc && (() => {
+            const pokemon = selectedSpawn.pokemon_definitions
+            if (!pokemon) return null
+            return (
+              <div style={{ position: 'absolute', bottom: 58, left: 0, right: 0, background: 'var(--card)', borderTop: '1px solid var(--border)', padding: '12px 16px', zIndex: 600, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: 36, lineHeight: 1 }}>{pokemon.sprite_emoji}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>{pokemon.name}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                    {selectedSpawn.cp} CP · {selectedSpawn.spawn_type} · radius {selectedSpawn.catch_radius_meters || 50}m
+                  </div>
+                </div>
+                <button
+                  disabled={deletingSpawn}
+                  style={{ background: 'var(--danger)', border: 'none', borderRadius: 10, color: 'white', padding: '10px 16px', fontWeight: 700, cursor: 'pointer', fontSize: 14, opacity: deletingSpawn ? 0.5 : 1 }}
+                  onClick={async () => {
+                    setDeletingSpawn(true)
+                    const { error } = await supabase.from('active_spawns')
+                      .update({ status: 'expired' })
+                      .eq('id', selectedSpawn.id)
+                    if (error) alert('Fout: ' + error.message)
+                    setSelectedSpawn(null)
+                    setDeletingSpawn(false)
+                  }}
+                >
+                  {deletingSpawn ? '...' : '🗑️'}
+                </button>
+                <button
+                  style={{ background: 'var(--bg3)', border: 'none', borderRadius: 10, color: 'var(--text2)', padding: '10px 12px', cursor: 'pointer', fontSize: 18 }}
+                  onClick={() => setSelectedSpawn(null)}
+                >✕</button>
               </div>
             )
           })()}

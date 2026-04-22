@@ -35,5 +35,5 @@ export const GAME_PHASES = {
 export const DEFAULT_CENTER = [51.0858, 5.4514] // Oudsberg, Oudsbergen
 export const DEFAULT_ZOOM = 16
 
-export const CATCH_RADIUS_METERS = 80
+export const CATCH_RADIUS_METERS = 50
 export const ADMIN_KEY = 'rocket'

@@ -123,8 +123,9 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
 
   async function handleSpawnClick(spawn) {
     if (!position) return
+    const radius = spawn.catch_radius_meters || CATCH_RADIUS_METERS
     const dist = getDistanceMeters(position.lat, position.lon, +spawn.latitude, +spawn.longitude)
-    if (dist > CATCH_RADIUS_METERS) return
+    if (dist > radius) return
     setActiveCatch(spawn)
     setActiveTab('catch')
   }
@@ -225,7 +226,8 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
             const pokemon = spawn.pokemon_definitions
             if (!pokemon) return null
             const dist = position ? getDistanceMeters(position.lat, position.lon, +spawn.latitude, +spawn.longitude) : 999
-            const nearby = dist <= CATCH_RADIUS_METERS
+            const spawnRadius = spawn.catch_radius_meters || CATCH_RADIUS_METERS
+            const nearby = dist <= spawnRadius
             const emoji = spawn.spawn_type === 'mystery' ? '❓'
               : spawn.spawn_type === 'legendary' ? '👑'
               : spawn.spawn_type === 'shiny' ? pokemon.sprite_emoji
