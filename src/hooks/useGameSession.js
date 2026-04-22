@@ -32,7 +32,22 @@ export function useGameSession(sessionId) {
     if (s) setSession(s)
     if (t) setTeams(t)
     if (p) setPlayers(p)
-    if (sp) setSpawns(sp)
+
+    // Auto-expire spawns waarvan expires_at al voorbij is
+    const now = new Date()
+    const toExpire = (sp || []).filter(s =>
+      s.expires_at && new Date(s.expires_at) < now
+    )
+    if (toExpire.length > 0) {
+      supabase.from('active_spawns')
+        .update({ status: 'expired' })
+        .in('id', toExpire.map(x => x.id))
+        .then(() => {})
+      setSpawns((sp || []).filter(s => !toExpire.some(e => e.id === s.id)))
+    } else {
+      if (sp) setSpawns(sp)
+    }
+
     if (c) setCatches(c)
     if (inv) setInventory(inv)
     if (eff) setEffects(eff)

@@ -78,13 +78,47 @@ function makeBiomeLabel(emoji, label, color) {
   })
 }
 
+// Countdown-icon met klok-overlay die met de klok mee vult (SVG stroke trick)
+function makeCountdownIcon(emoji, totalSeconds, elapsedSeconds) {
+  const r = 10
+  const circ = +(2 * Math.PI * r).toFixed(2)
+  const fraction = Math.min(1, Math.max(0, elapsedSeconds / totalSeconds))
+  const offset = +(circ * (1 - fraction)).toFixed(2)
+  const remaining = Math.max(0, totalSeconds - elapsedSeconds)
+  return L.divIcon({
+    html: `<div style="position:relative;width:44px;height:58px;">
+      <div style="font-size:44px;line-height:1;text-align:center;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.9));animation:bokePulse 1.2s ease-in-out infinite;">
+        ${emoji}
+      </div>
+      <svg viewBox="0 0 44 44" width="44" height="44" style="position:absolute;top:0;left:0;pointer-events:none;">
+        <circle cx="22" cy="22" r="${r}"
+          fill="none"
+          stroke="rgba(20,20,20,0.7)"
+          stroke-width="${r * 2}"
+          stroke-dasharray="${circ}"
+          stroke-dashoffset="${offset}"
+          transform="rotate(-90 22 22)"
+          style="animation:bokeCountdown ${remaining.toFixed(1)}s linear forwards;"
+        />
+      </svg>
+      <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.9);border-radius:6px;padding:1px 7px;font-size:11px;font-weight:800;color:#ef4444;white-space:nowrap;letter-spacing:0.5px;">
+        ⏱ ${Math.ceil(remaining)}s
+      </div>
+    </div>`,
+    iconSize: [44, 58],
+    iconAnchor: [22, 22],
+    className: '',
+  })
+}
+
 export default function MapScreen({ player, session, isAdmin, onSignOut }) {
-  const { teams, players, spawns, catches, inventory, effects, notifications, events } = useGameSession(session.id)
+  const { teams, players, spawns, catches, inventory, effects, notifications, events, refetch } = useGameSession(session.id)
   const { position, error: gpsError } = usePlayerLocation(player.id, session.id)
   const [activeTab, setActiveTab] = useState('map')
   const [activeCatch, setActiveCatch] = useState(null)
   const [stealChallenge, setStealChallenge] = useState(null)
   const [areas, setAreas] = useState([])
+  const [nowMs, setNowMs] = useState(Date.now())
   const mapRef = useRef(null)
 
   // Derive own team from loaded data
@@ -96,6 +130,24 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
     supabase.from('game_areas').select('*').eq('game_session_id', session.id)
       .then(({ data }) => { if (data) setAreas(data) })
   }, [session.id])
+
+  // Klok-ticker voor fading spawns (1x per seconde als er fading spawns zijn)
+  useEffect(() => {
+    const fading = spawns.filter(s => s.expires_at && s.fade_duration_seconds)
+    if (fading.length === 0) return
+    const iv = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(iv)
+  }, [spawns.length])
+
+  // Trigger refetch zodra een fading spawn verloopt
+  useEffect(() => {
+    const fading = spawns.filter(s => s.expires_at && s.fade_duration_seconds)
+    if (fading.length === 0) return
+    const soonest = Math.min(...fading.map(s => new Date(s.expires_at) - Date.now()))
+    if (soonest <= 0) { refetch(); return }
+    const timer = setTimeout(() => refetch(), soonest + 500)
+    return () => clearTimeout(timer)
+  }, [spawns])
 
   // Moonstone actief voor mijn team?
   const moonstoneActive = team && effects.some(e =>
@@ -230,12 +282,23 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
             const nearby = dist <= spawnRadius
             const emoji = spawn.spawn_type === 'mystery' ? '❓'
               : spawn.spawn_type === 'legendary' ? '👑'
-              : spawn.spawn_type === 'shiny' ? pokemon.sprite_emoji
               : pokemon.sprite_emoji
+
+            // Fading spawn: countdown overlay
+            const isFading = spawn.fade_duration_seconds && spawn.expires_at
+            let spawnIcon
+            if (isFading) {
+              const total = spawn.fade_duration_seconds
+              const elapsed = Math.max(0, (nowMs - (new Date(spawn.expires_at) - total * 1000)) / 1000)
+              spawnIcon = makeCountdownIcon(emoji, total, elapsed)
+            } else {
+              spawnIcon = makeEmojiIcon(emoji, 40, nearby)
+            }
+
             const typeInfo = POKEMON_TYPES[pokemon.pokemon_type] || {}
             return (
               <Marker key={spawn.id} position={[+spawn.latitude, +spawn.longitude]}
-                icon={makeEmojiIcon(emoji, 40, nearby)}
+                icon={spawnIcon}
                 eventHandlers={{ click: () => handleSpawnClick(spawn) }}>
                 <Popup>
                   <div className="spawn-popup">

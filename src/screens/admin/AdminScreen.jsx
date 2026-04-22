@@ -69,6 +69,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [detectedBiomeType, setDetectedBiomeType] = useState(null)
   const [selectedSpawn, setSelectedSpawn] = useState(null) // spawn geselecteerd op kaart
   const [deletingSpawn, setDeletingSpawn] = useState(false)
+  const [pendingFadeSeconds, setPendingFadeSeconds] = useState(60)
   const [shopActive, setShopActive] = useState(false)
   const mapRef = useRef(null)
 
@@ -463,33 +464,66 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             const pokemon = selectedSpawn.pokemon_definitions
             if (!pokemon) return null
             return (
-              <div style={{ position: 'absolute', bottom: 58, left: 0, right: 0, background: 'var(--card)', borderTop: '1px solid var(--border)', padding: '12px 16px', zIndex: 600, display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ fontSize: 36, lineHeight: 1 }}>{pokemon.sprite_emoji}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 800, fontSize: 16 }}>{pokemon.name}</div>
-                  <div style={{ fontSize: 13, color: 'var(--text2)' }}>
-                    {selectedSpawn.cp} CP · {selectedSpawn.spawn_type} · radius {selectedSpawn.catch_radius_meters || 50}m
+              <div style={{ position: 'absolute', bottom: 58, left: 0, right: 0, background: 'var(--card)', borderTop: '2px solid var(--border)', padding: '12px 16px', zIndex: 600 }}>
+                {/* Header: pokemon info + sluit */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                  <div style={{ fontSize: 34, lineHeight: 1 }}>{pokemon.sprite_emoji}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 800, fontSize: 15 }}>{pokemon.name}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                      {selectedSpawn.cp} CP · {selectedSpawn.spawn_type} · {selectedSpawn.catch_radius_meters || 50}m radius
+                      {selectedSpawn.fade_duration_seconds ? ` · ⏱ fade actief` : ''}
+                    </div>
+                  </div>
+                  <button style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 20, cursor: 'pointer', padding: '4px 8px' }}
+                    onClick={() => setSelectedSpawn(null)}>✕</button>
+                </div>
+
+                {/* Acties: twee rijen */}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {/* Verwijderen */}
+                  <button
+                    disabled={deletingSpawn}
+                    style={{ flex: 1, background: 'var(--danger)', border: 'none', borderRadius: 10, color: 'white', padding: '12px 0', fontWeight: 700, cursor: 'pointer', fontSize: 14, opacity: deletingSpawn ? 0.5 : 1 }}
+                    onClick={async () => {
+                      setDeletingSpawn(true)
+                      const { error } = await supabase.from('active_spawns')
+                        .update({ status: 'expired' })
+                        .eq('id', selectedSpawn.id)
+                      if (error) alert('Fout: ' + error.message)
+                      setSelectedSpawn(null)
+                      setDeletingSpawn(false)
+                    }}
+                  >
+                    {deletingSpawn ? '⏳' : '🗑️ Verwijderen'}
+                  </button>
+
+                  {/* Fade met timer */}
+                  <div style={{ flex: 2, display: 'flex', gap: 6, alignItems: 'center', background: 'var(--bg3)', borderRadius: 10, padding: '8px 10px' }}>
+                    <span style={{ fontSize: 13, color: 'var(--text2)', whiteSpace: 'nowrap' }}>⏱ Fade na</span>
+                    <input
+                      type="number" min={5} max={600}
+                      value={pendingFadeSeconds}
+                      onChange={e => setPendingFadeSeconds(Number(e.target.value))}
+                      style={{ width: 52, padding: '4px 6px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)', fontSize: 14, fontWeight: 700, textAlign: 'center' }}
+                    />
+                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>sec</span>
+                    <button
+                      style={{ background: 'var(--warning)', border: 'none', borderRadius: 8, color: '#000', padding: '6px 10px', fontWeight: 800, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}
+                      onClick={async () => {
+                        const sec = pendingFadeSeconds || 60
+                        const expiresAt = new Date(Date.now() + sec * 1000).toISOString()
+                        const { error } = await supabase.from('active_spawns')
+                          .update({ expires_at: expiresAt, fade_duration_seconds: sec })
+                          .eq('id', selectedSpawn.id)
+                        if (error) alert('Fout: ' + error.message)
+                        setSelectedSpawn(null)
+                      }}
+                    >
+                      ✓ Instellen
+                    </button>
                   </div>
                 </div>
-                <button
-                  disabled={deletingSpawn}
-                  style={{ background: 'var(--danger)', border: 'none', borderRadius: 10, color: 'white', padding: '10px 16px', fontWeight: 700, cursor: 'pointer', fontSize: 14, opacity: deletingSpawn ? 0.5 : 1 }}
-                  onClick={async () => {
-                    setDeletingSpawn(true)
-                    const { error } = await supabase.from('active_spawns')
-                      .update({ status: 'expired' })
-                      .eq('id', selectedSpawn.id)
-                    if (error) alert('Fout: ' + error.message)
-                    setSelectedSpawn(null)
-                    setDeletingSpawn(false)
-                  }}
-                >
-                  {deletingSpawn ? '...' : '🗑️'}
-                </button>
-                <button
-                  style={{ background: 'var(--bg3)', border: 'none', borderRadius: 10, color: 'var(--text2)', padding: '10px 12px', cursor: 'pointer', fontSize: 18 }}
-                  onClick={() => setSelectedSpawn(null)}
-                >✕</button>
               </div>
             )
           })()}

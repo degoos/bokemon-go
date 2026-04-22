@@ -363,3 +363,12 @@ h3 { font-size: 18px; font-weight: 700; }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Bokémon fade-countdown animaties */
+@keyframes bokePulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.18); }
+}
+@keyframes bokeCountdown {
+  to { stroke-dashoffset: 0; }
+}
