@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polygon, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -53,6 +53,28 @@ function makeEmojiIcon(emoji, size = 36, glow = false) {
   return L.divIcon({
     html: `<div style="font-size:${size}px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.8))${glow?' drop-shadow(0 0 8px gold)':''};">${emoji}</div>`,
     iconSize: [size, size], iconAnchor: [size/2, size/2], popupAnchor: [0, -size/2], className: '',
+  })
+}
+
+function makePlayerIcon(emoji, name, isMe, size = 32) {
+  const border = isMe ? '2px solid #facc15' : '2px solid rgba(255,255,255,0.3)'
+  const bg = isMe ? 'rgba(250,204,21,0.25)' : 'rgba(0,0,0,0.45)'
+  return L.divIcon({
+    html: `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+      <div style="font-size:${size}px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.9));">${emoji}</div>
+      <div style="background:${bg};border:${border};border-radius:8px;padding:1px 5px;font-size:10px;font-weight:700;color:white;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis;">${isMe ? '📍 Jij' : name}</div>
+    </div>`,
+    iconSize: [size, size + 20],
+    iconAnchor: [size/2, size + 20],
+    popupAnchor: [0, -(size + 20)],
+    className: '',
+  })
+}
+
+function makeBiomeLabel(emoji, label, color) {
+  return L.divIcon({
+    html: `<div style="background:${color}33;border:1px solid ${color}88;border-radius:8px;padding:4px 8px;font-size:13px;font-weight:700;color:white;text-shadow:0 1px 3px rgba(0,0,0,0.9);white-space:nowrap;">${emoji} ${label}</div>`,
+    iconSize: [80, 28], iconAnchor: [40, 14], className: '',
   })
 }
 
@@ -147,33 +169,43 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
           <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />
           <MapAutoCenter areas={areas} position={position} />
 
-          {/* Speelveld grens */}
+          {/* Speelveld grens — dikke paarse stippellijn */}
           {areas.filter(a => a.type === 'boundary').map(area => {
             const pts = (area.geojson?.geometry?.coordinates?.[0] || []).map(([lon, lat]) => [lat, lon])
-            return pts.length > 2 ? <Polygon key={area.id} positions={pts} pathOptions={{ color:'#7c3aed', fillOpacity:0, weight:3, dashArray:'8,5' }} /> : null
+            return pts.length > 2 ? <Polygon key={area.id} positions={pts} pathOptions={{ color:'#a855f7', fillOpacity:0, weight:4, dashArray:'10,6' }} /> : null
           })}
 
-          {/* Biome overlays */}
+          {/* Biome zones — gekleurde vlakken + label in het midden */}
           {areas.filter(a => a.type === 'biome').map(area => {
             const pts = (area.geojson?.geometry?.coordinates?.[0] || []).map(([lon, lat]) => [lat, lon])
             const info = POKEMON_TYPES[area.pokemon_type] || {}
-            return pts.length > 2 ? <Polygon key={area.id} positions={pts} pathOptions={{ color: info.mapColor||'#fff', fillColor: info.mapColor||'#fff', fillOpacity: 0.12, weight:1 }} /> : null
+            if (pts.length < 3) return null
+            const lats = pts.map(([lat]) => lat)
+            const lons = pts.map(([, lon]) => lon)
+            const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
+            const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2
+            return (
+              <React.Fragment key={area.id}>
+                <Polygon positions={pts} pathOptions={{ color: info.mapColor||'#fff', fillColor: info.mapColor||'#fff', fillOpacity: 0.22, weight: 2 }} />
+                <Marker position={[centerLat, centerLon]} icon={makeBiomeLabel(info.emoji||'', info.label||area.pokemon_type, info.mapColor||'#fff')} interactive={false} />
+              </React.Fragment>
+            )
           })}
 
           {/* Eigen locatie */}
           {position && (
             <>
               <Circle center={[position.lat, position.lon]} radius={CATCH_RADIUS_METERS}
-                pathOptions={{ color:'#7c3aed', fillOpacity:0.08, weight:1 }} />
-              <Marker position={[position.lat, position.lon]} icon={makeEmojiIcon('📍', 28)}>
-                <Popup><div className="spawn-popup"><h4>Jij — {player.name}</h4></div></Popup>
+                pathOptions={{ color:'#facc15', fillColor:'#facc15', fillOpacity:0.08, weight:1.5, dashArray:'4,3' }} />
+              <Marker position={[position.lat, position.lon]} icon={makePlayerIcon(team?.emoji||'📍', player.name, true, 32)}>
+                <Popup><div className="spawn-popup"><h4>📍 {player.name}</h4><div style={{color:'var(--text2)',fontSize:12}}>{team?.name || 'Admin'}</div></div></Popup>
               </Marker>
             </>
           )}
 
           {/* Teamgenoten */}
           {myTeamPlayers.filter(p => p.latitude && p.longitude).map(p => (
-            <Marker key={p.id} position={[+p.latitude, +p.longitude]} icon={makeEmojiIcon(team?.emoji||'🔵', 26)}>
+            <Marker key={p.id} position={[+p.latitude, +p.longitude]} icon={makePlayerIcon(team?.emoji||'🔵', p.name, false, 30)}>
               <Popup><div className="spawn-popup"><h4>{p.name}</h4><div style={{color:'var(--text2)',fontSize:12}}>{team?.name}</div></div></Popup>
             </Marker>
           ))}
@@ -182,7 +214,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
           {opponentsVisible && enemyPlayers.filter(p => p.latitude && p.longitude).map(p => {
             const eTeam = teams.find(t => t.id === p.team_id)
             return (
-              <Marker key={p.id} position={[+p.latitude, +p.longitude]} icon={makeEmojiIcon(eTeam?.emoji||'❗', 26)}>
+              <Marker key={p.id} position={[+p.latitude, +p.longitude]} icon={makePlayerIcon(eTeam?.emoji||'❗', p.name, false, 30)}>
                 <Popup><div className="spawn-popup"><h4>⚠️ {p.name}</h4><div style={{color:'var(--danger)',fontSize:12,fontWeight:700}}>Tegenstander!</div></div></Popup>
               </Marker>
             )
