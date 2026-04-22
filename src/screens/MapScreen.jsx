@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Circle, Polygon, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Circle, Polygon, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { supabase } from '../lib/supabase'
@@ -19,6 +19,35 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 })
+
+// Centreert de kaart reactief op speelveld of GPS zodra data beschikbaar is
+function MapAutoCenter({ areas, position }) {
+  const map = useMap()
+  const gpsCenteredRef = useRef(false)
+  const fieldCenteredRef = useRef(false)
+
+  // Zodra GPS beschikbaar is: center op speler (eenmalig)
+  useEffect(() => {
+    if (!position || gpsCenteredRef.current) return
+    map.setView([position.lat, position.lon], DEFAULT_ZOOM)
+    gpsCenteredRef.current = true
+  }, [position, map])
+
+  // Fallback: center op speelveld als GPS nog niet beschikbaar
+  useEffect(() => {
+    if (gpsCenteredRef.current || fieldCenteredRef.current) return
+    const boundary = areas.find(a => a.type === 'boundary')
+    if (boundary) {
+      const center = getPolygonCenter(boundary.geojson)
+      if (center) {
+        map.setView(center, DEFAULT_ZOOM)
+        fieldCenteredRef.current = true
+      }
+    }
+  }, [areas, map])
+
+  return null
+}
 
 function makeEmojiIcon(emoji, size = 36, glow = false) {
   return L.divIcon({
@@ -116,6 +145,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
           zoomControl={false}
         >
           <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />
+          <MapAutoCenter areas={areas} position={position} />
 
           {/* Speelveld grens */}
           {areas.filter(a => a.type === 'boundary').map(area => {

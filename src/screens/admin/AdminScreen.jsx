@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Polygon, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polygon, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { supabase } from '../../lib/supabase'
@@ -27,6 +27,31 @@ function makeEmojiIcon(emoji, size = 36) {
 // Klik op kaart voor spawn of polygon
 function MapClickHandler({ mode, onMapClick }) {
   useMapEvents({ click: (e) => onMapClick(e.latlng) })
+  return null
+}
+
+function MapAutoCenter({ areas, position }) {
+  const map = useMap()
+  const gpsCenteredRef = useRef(false)
+  const fieldCenteredRef = useRef(false)
+  useEffect(() => {
+    if (!position || gpsCenteredRef.current) return
+    map.setView([position.lat, position.lon], 17)
+    gpsCenteredRef.current = true
+  }, [position, map])
+  useEffect(() => {
+    if (gpsCenteredRef.current || fieldCenteredRef.current) return
+    const boundary = areas.find(a => a.type === 'boundary')
+    if (boundary) {
+      const coords = boundary.geojson?.geometry?.coordinates?.[0] || []
+      if (coords.length > 0) {
+        const lats = coords.map(([, lat]) => lat)
+        const lons = coords.map(([lon]) => lon)
+        map.setView([(Math.min(...lats)+Math.max(...lats))/2, (Math.min(...lons)+Math.max(...lons))/2], 17)
+        fieldCenteredRef.current = true
+      }
+    }
+  }, [areas, map])
   return null
 }
 
@@ -283,6 +308,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
           >
             <TileLayer url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />
             <MapClickHandler mode={mapMode} onMapClick={handleMapClick} />
+            <MapAutoCenter areas={areas} position={position} />
 
             {/* Gebieden */}
             {areas.filter(a => a.type === 'boundary').map(area => {
