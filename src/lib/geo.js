@@ -63,3 +63,15 @@ export function latLngsToGeoJSON(latLngs) {
     geometry: { type: 'Polygon', coordinates: [coords] }
   }
 }
+
+// Bereken centroid van een GeoJSON polygon
+export function getPolygonCenter(geojson) {
+  const coords = geojson?.geometry?.coordinates?.[0] || geojson?.coordinates?.[0] || []
+  if (coords.length === 0) return null
+  const lats = coords.map(([, lat]) => lat)
+  const lons = coords.map(([lon]) => lon)
+  return [
+    (Math.min(...lats) + Math.max(...lats)) / 2,
+    (Math.min(...lons) + Math.max(...lons)) / 2,
+  ]
+}

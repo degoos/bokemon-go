@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase'
 import { useGameSession } from '../../hooks/useGameSession'
 import { usePlayerLocation } from '../../hooks/usePlayerLocation'
 import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM } from '../../lib/constants'
+import { getPolygonCenter } from '../../lib/geo'
 import { autoSpawnPokemon } from '../../lib/gameEngine'
 import NotificationBanner from '../../components/NotificationBanner'
 
@@ -270,7 +271,11 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       {tab === 'map' && (
         <div style={{ flex: 1, position: 'relative' }}>
           <MapContainer
-            center={position ? [position.lat, position.lon] : DEFAULT_CENTER}
+            center={(() => {
+              const boundary = areas.find(a => a.type === 'boundary')
+              const fieldCenter = boundary ? getPolygonCenter(boundary.geojson) : null
+              return position ? [position.lat, position.lon] : (fieldCenter || DEFAULT_CENTER)
+            })()}
             zoom={DEFAULT_ZOOM}
             ref={mapRef}
             style={{ height: '100%' }}
@@ -283,7 +288,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             {areas.filter(a => a.type === 'boundary').map(area => {
               const coords = area.geojson?.geometry?.coordinates?.[0] || []
               const latLngs = coords.map(([lon, lat]) => [lat, lon])
-              return latLngs.length > 2 ? <Polygon key={area.id} positions={latLngs} pathOptions={{ color: '#7c3aed', fillOpacity: 0.05, weight: 2, dashArray: '6,4' }} /> : null
+              return latLngs.length > 2 ? <Polygon key={area.id} positions={latLngs} pathOptions={{ color: '#7c3aed', fillOpacity: 0, weight: 3, dashArray: '8,5' }} /> : null
             })}
             {areas.filter(a => a.type === 'biome').map(area => {
               const coords = area.geojson?.geometry?.coordinates?.[0] || []

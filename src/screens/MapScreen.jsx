@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css'
 import { supabase } from '../lib/supabase'
 import { useGameSession } from '../hooks/useGameSession'
 import { usePlayerLocation } from '../hooks/usePlayerLocation'
-import { getDistanceMeters } from '../lib/geo'
+import { getDistanceMeters, getPolygonCenter } from '../lib/geo'
 import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM, CATCH_RADIUS_METERS } from '../lib/constants'
 import CatchFlow from '../components/CatchFlow'
 import StealFlow from '../components/StealFlow'
@@ -95,6 +95,11 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
   const myTeamPlayers = players.filter(p => p.team_id === team?.id && p.id !== player.id)
   const enemyPlayers = players.filter(p => team && p.team_id !== team.id && p.team_id !== null)
 
+  // Kaartcentrum: GPS > speelveld centrum > Oudsberg
+  const boundary = areas.find(a => a.type === 'boundary')
+  const fieldCenter = boundary ? getPolygonCenter(boundary.geojson) : null
+  const mapCenter = position ? [position.lat, position.lon] : (fieldCenter || DEFAULT_CENTER)
+
   const showOverlay = ['catch','steal','inventory','pokedex'].includes(activeTab)
 
   return (
@@ -104,7 +109,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
       {/* Kaart (altijd gerenderd, verborgen tijdens overlays) */}
       <div style={{ flex: 1, display: showOverlay ? 'none' : 'flex', flexDirection: 'column', position: 'relative' }}>
         <MapContainer
-          center={position ? [position.lat, position.lon] : DEFAULT_CENTER}
+          center={mapCenter}
           zoom={DEFAULT_ZOOM}
           ref={mapRef}
           style={{ flex: 1 }}
@@ -115,7 +120,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
           {/* Speelveld grens */}
           {areas.filter(a => a.type === 'boundary').map(area => {
             const pts = (area.geojson?.geometry?.coordinates?.[0] || []).map(([lon, lat]) => [lat, lon])
-            return pts.length > 2 ? <Polygon key={area.id} positions={pts} pathOptions={{ color:'#7c3aed', fillOpacity:0.05, weight:2, dashArray:'6,4' }} /> : null
+            return pts.length > 2 ? <Polygon key={area.id} positions={pts} pathOptions={{ color:'#7c3aed', fillOpacity:0, weight:3, dashArray:'8,5' }} /> : null
           })}
 
           {/* Biome overlays */}
