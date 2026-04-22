@@ -330,7 +330,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
 
       {/* Overlays */}
       {activeTab === 'catch' && activeCatch && (
-        <CatchFlow spawn={activeCatch} player={player} team={team}
+        <CatchFlow spawn={activeCatch} player={player} team={team} session={session}
           onClose={() => { setActiveCatch(null); setActiveTab('map') }}
           onCaught={() => setTimeout(() => { setActiveCatch(null); setActiveTab('map') }, 2500)} />
       )}

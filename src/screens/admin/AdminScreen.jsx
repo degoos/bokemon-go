@@ -476,7 +476,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                       const isFirstOfOtherType = detectedBiomeType && i > 0 && p.pokemon_type !== detectedBiomeType && sortedPokemons[i-1].pokemon_type === detectedBiomeType
                       return (
                         <option key={p.id} value={p.id}>
-                          {p.sprite_emoji} {p.name}{isFirstOfOtherType ? ' ·' : ''}
+                          {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} CP){isFirstOfOtherType ? ' ·' : ''}
                         </option>
                       )
                     })}
