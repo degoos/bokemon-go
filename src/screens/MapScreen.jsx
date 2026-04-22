@@ -131,23 +131,14 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
       .then(({ data }) => { if (data) setAreas(data) })
   }, [session.id])
 
-  // Klok-ticker voor fading spawns (1x per seconde als er fading spawns zijn)
+  // Klok-ticker voor fading spawns: dependency is de lijst van expires_at waarden
+  // zodat de interval herstart als een bestaande spawn een fade_duration_seconds krijgt
+  const fadingKey = spawns.filter(s => s.fade_duration_seconds).map(s => s.id + s.expires_at).join(',')
   useEffect(() => {
-    const fading = spawns.filter(s => s.expires_at && s.fade_duration_seconds)
-    if (fading.length === 0) return
+    if (!fadingKey) return
     const iv = setInterval(() => setNowMs(Date.now()), 1000)
     return () => clearInterval(iv)
-  }, [spawns.length])
-
-  // Trigger refetch zodra een fading spawn verloopt
-  useEffect(() => {
-    const fading = spawns.filter(s => s.expires_at && s.fade_duration_seconds)
-    if (fading.length === 0) return
-    const soonest = Math.min(...fading.map(s => new Date(s.expires_at) - Date.now()))
-    if (soonest <= 0) { refetch(); return }
-    const timer = setTimeout(() => refetch(), soonest + 500)
-    return () => clearTimeout(timer)
-  }, [spawns])
+  }, [fadingKey])
 
   // Moonstone actief voor mijn team?
   const moonstoneActive = team && effects.some(e =>

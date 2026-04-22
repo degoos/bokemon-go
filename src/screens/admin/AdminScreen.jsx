@@ -24,6 +24,32 @@ function makeEmojiIcon(emoji, size = 36) {
   })
 }
 
+// Zelfde countdown-icon als MapScreen (gedeeld via copy zodat geen extra import nodig is)
+function makeCountdownIcon(emoji, totalSeconds, elapsedSeconds) {
+  const r = 10
+  const circ = +(2 * Math.PI * r).toFixed(2)
+  const fraction = Math.min(1, Math.max(0, elapsedSeconds / totalSeconds))
+  const offset = +(circ * (1 - fraction)).toFixed(2)
+  const remaining = Math.max(0, totalSeconds - elapsedSeconds)
+  return L.divIcon({
+    html: `<div style="position:relative;width:44px;height:58px;">
+      <div style="font-size:44px;line-height:1;text-align:center;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.9));animation:bokePulse 1.2s ease-in-out infinite;">
+        ${emoji}
+      </div>
+      <svg viewBox="0 0 44 44" width="44" height="44" style="position:absolute;top:0;left:0;pointer-events:none;">
+        <circle cx="22" cy="22" r="${r}" fill="none" stroke="rgba(20,20,20,0.7)"
+          stroke-width="${r * 2}" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"
+          transform="rotate(-90 22 22)"
+          style="animation:bokeCountdown ${remaining.toFixed(1)}s linear forwards;" />
+      </svg>
+      <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.9);border-radius:6px;padding:1px 7px;font-size:11px;font-weight:800;color:#ef4444;white-space:nowrap;">
+        ⏱ ${Math.ceil(remaining)}s
+      </div>
+    </div>`,
+    iconSize: [44, 58], iconAnchor: [22, 22], className: '',
+  })
+}
+
 // Klik op kaart voor spawn of polygon
 function MapClickHandler({ mode, onMapClick }) {
   useMapEvents({ click: (e) => onMapClick(e.latlng) })
@@ -70,7 +96,16 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [selectedSpawn, setSelectedSpawn] = useState(null) // spawn geselecteerd op kaart
   const [deletingSpawn, setDeletingSpawn] = useState(false)
   const [pendingFadeSeconds, setPendingFadeSeconds] = useState(60)
+  const [nowMs, setNowMs] = useState(Date.now())
   const [shopActive, setShopActive] = useState(false)
+
+  // Klok-ticker voor fading spawns in admin-kaart
+  const adminFadingKey = spawns.filter(s => s.fade_duration_seconds).map(s => s.id + s.expires_at).join(',')
+  useEffect(() => {
+    if (!adminFadingKey) return
+    const iv = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(iv)
+  }, [adminFadingKey])
   const mapRef = useRef(null)
 
   useEffect(() => {
@@ -365,9 +400,20 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             {spawns.map(spawn => {
               const pokemon = spawn.pokemon_definitions
               const isSelected = selectedSpawn?.id === spawn.id
+              const isFading = spawn.fade_duration_seconds && spawn.expires_at
+              let icon
+              if (isSelected) {
+                icon = makeEmojiIcon('🎯', 38)
+              } else if (isFading) {
+                const total = spawn.fade_duration_seconds
+                const elapsed = Math.max(0, (nowMs - (new Date(spawn.expires_at) - total * 1000)) / 1000)
+                icon = makeCountdownIcon(pokemon.sprite_emoji, total, elapsed)
+              } else {
+                icon = makeEmojiIcon(pokemon.sprite_emoji, 32)
+              }
               return pokemon ? (
                 <Marker key={spawn.id} position={[Number(spawn.latitude), Number(spawn.longitude)]}
-                  icon={makeEmojiIcon(isSelected ? '🎯' : pokemon.sprite_emoji, isSelected ? 38 : 32)}
+                  icon={icon}
                   eventHandlers={{ click: () => setSelectedSpawn(selectedSpawn?.id === spawn.id ? null : spawn) }}
                 />
               ) : null
@@ -511,12 +557,18 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                     <button
                       style={{ background: 'var(--warning)', border: 'none', borderRadius: 8, color: '#000', padding: '6px 10px', fontWeight: 800, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}
                       onClick={async () => {
-                        const sec = pendingFadeSeconds || 60
+                        const sec = Math.max(5, pendingFadeSeconds || 60)
                         const expiresAt = new Date(Date.now() + sec * 1000).toISOString()
-                        const { error } = await supabase.from('active_spawns')
+                        // Probeer met fade_duration_seconds; fallback op enkel expires_at
+                        let { error } = await supabase.from('active_spawns')
                           .update({ expires_at: expiresAt, fade_duration_seconds: sec })
                           .eq('id', selectedSpawn.id)
-                        if (error) alert('Fout: ' + error.message)
+                        if (error) {
+                          const { error: err2 } = await supabase.from('active_spawns')
+                            .update({ expires_at: expiresAt })
+                            .eq('id', selectedSpawn.id)
+                          if (err2) { alert('Fout: ' + err2.message); return }
+                        }
                         setSelectedSpawn(null)
                       }}
                     >

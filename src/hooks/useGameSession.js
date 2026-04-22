@@ -55,6 +55,18 @@ export function useGameSession(sessionId) {
     setLoading(false)
   }, [sessionId])
 
+  // Auto-expire timer: zodra een fading spawn verloopt, roep fetchAll aan
+  // Dit werkt voor zowel AdminScreen als MapScreen
+  useEffect(() => {
+    if (!sessionId) return
+    const fading = spawns.filter(s => s.expires_at && new Date(s.expires_at) > new Date())
+    if (fading.length === 0) return
+    const soonest = Math.min(...fading.map(s => new Date(s.expires_at) - Date.now()))
+    if (soonest <= 0) { fetchAll(); return }
+    const timer = setTimeout(() => fetchAll(), soonest + 300)
+    return () => clearTimeout(timer)
+  }, [spawns, sessionId, fetchAll])
+
   useEffect(() => {
     if (!sessionId) return
     fetchAll()
