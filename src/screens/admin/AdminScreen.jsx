@@ -389,7 +389,14 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   }
 
   async function handlePhaseChange(newPhase) {
-    await supabase.from('game_sessions').update({ status: newPhase, phase: newPhase }).eq('id', initialSession.id)
+    const { error } = await supabase
+      .from('game_sessions')
+      .update({ status: newPhase })
+      .eq('id', initialSession.id)
+    if (!error) {
+      // Optimistic update zodat UI direct reageert (ongeacht realtime)
+      refetch()
+    }
   }
 
   async function confirmEvent(eventId) {
