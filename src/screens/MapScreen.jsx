@@ -57,6 +57,70 @@ function makeEmojiIcon(emoji, size = 36, glow = false) {
   })
 }
 
+function makeShinyIcon(emoji, size = 42) {
+  return L.divIcon({
+    html: `<div style="position:relative;width:${size+14}px;height:${size+14}px;">
+      <div style="font-size:${size}px;line-height:1;filter:drop-shadow(0 0 10px gold) drop-shadow(0 2px 4px rgba(0,0,0,0.8));animation:bokePulse 1.2s ease-in-out infinite;">${emoji}</div>
+      <div style="position:absolute;top:-4px;right:-4px;font-size:18px;line-height:1;">✨</div>
+    </div>`,
+    iconSize: [size + 14, size + 14], iconAnchor: [(size+14)/2, (size+14)/2], popupAnchor: [0, -(size+14)/2], className: '',
+  })
+}
+
+function makeLegendaryIcon(emoji, size = 48) {
+  return L.divIcon({
+    html: `<div style="position:relative;width:${size+14}px;height:${size+14}px;">
+      <div style="font-size:${size}px;line-height:1;filter:drop-shadow(0 0 14px gold) drop-shadow(0 0 6px #f59e0b) drop-shadow(0 2px 4px rgba(0,0,0,0.9));animation:bokePulse 0.9s ease-in-out infinite;">${emoji}</div>
+      <div style="position:absolute;top:-6px;right:-6px;font-size:20px;line-height:1;">👑</div>
+    </div>`,
+    iconSize: [size + 14, size + 14], iconAnchor: [(size+14)/2, (size+14)/2], popupAnchor: [0, -(size+14)/2], className: '',
+  })
+}
+
+function makeMysteryIcon(size = 40) {
+  return L.divIcon({
+    html: `<div style="font-size:${size}px;line-height:1;filter:drop-shadow(0 0 8px #a855f7) drop-shadow(0 2px 4px rgba(0,0,0,0.8));animation:bokePulse 1.5s ease-in-out infinite;">❓</div>`,
+    iconSize: [size, size], iconAnchor: [size/2, size/2], popupAnchor: [0, -size/2], className: '',
+  })
+}
+
+// Catching-countdown: toont aftellende klok terwijl team 1 wacht op team 2
+function makeCatchingCountdownIcon(emoji, waitSeconds, elapsedSeconds) {
+  const remaining = Math.max(0, waitSeconds - elapsedSeconds)
+  const r = 10
+  const circ = +(2 * Math.PI * r).toFixed(2)
+  const fraction = Math.min(1, Math.max(0, elapsedSeconds / waitSeconds))
+  const offset = +(circ * (1 - fraction)).toFixed(2)
+  return L.divIcon({
+    html: `<div style="position:relative;width:48px;height:64px;">
+      <div style="font-size:40px;line-height:1;text-align:center;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.9));animation:bokePulse 0.7s ease-in-out infinite;">
+        ${emoji}
+      </div>
+      <div style="position:absolute;top:-4px;right:-6px;font-size:16px;line-height:1;">⚾</div>
+      <svg viewBox="0 0 44 44" width="44" height="44" style="position:absolute;top:0;left:2px;pointer-events:none;">
+        <circle cx="22" cy="22" r="${r}" fill="none" stroke="rgba(239,68,68,0.8)"
+          stroke-width="${r * 2}" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"
+          transform="rotate(-90 22 22)" />
+      </svg>
+      <div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);background:rgba(239,68,68,0.92);border-radius:6px;padding:1px 7px;font-size:11px;font-weight:800;color:white;white-space:nowrap;">
+        ⚔️ ${Math.ceil(remaining)}s
+      </div>
+    </div>`,
+    iconSize: [48, 64], iconAnchor: [24, 48], className: '',
+  })
+}
+
+// Catching actief (challenge loopt al, geen wachttimer meer)
+function makeBattleIcon(emoji, size = 40) {
+  return L.divIcon({
+    html: `<div style="position:relative;width:${size+14}px;height:${size+14}px;">
+      <div style="font-size:${size}px;line-height:1;filter:drop-shadow(0 0 8px #ef4444) drop-shadow(0 2px 4px rgba(0,0,0,0.8));animation:bokePulse 0.6s ease-in-out infinite;">${emoji}</div>
+      <div style="position:absolute;top:-4px;right:-6px;font-size:16px;line-height:1;">⚡</div>
+    </div>`,
+    iconSize: [size + 14, size + 14], iconAnchor: [(size+14)/2, (size+14)/2], className: '',
+  })
+}
+
 function makePlayerIcon(emoji, name, isMe, size = 32) {
   const border = isMe ? '2px solid #facc15' : '2px solid rgba(255,255,255,0.3)'
   const bg = isMe ? 'rgba(250,204,21,0.25)' : 'rgba(0,0,0,0.45)'
@@ -133,14 +197,16 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
       .then(({ data }) => { if (data) setAreas(data) })
   }, [session.id])
 
-  // Klok-ticker voor fading spawns: dependency is de lijst van expires_at waarden
-  // zodat de interval herstart als een bestaande spawn een fade_duration_seconds krijgt
-  const fadingKey = spawns.filter(s => s.fade_duration_seconds).map(s => s.id + s.expires_at).join(',')
+  // Klok-ticker voor fading spawns én catching-spawns (beide hebben een aftellende klok)
+  const tickingKey = [
+    ...spawns.filter(s => s.fade_duration_seconds && s.expires_at).map(s => `f${s.id}${s.expires_at}`),
+    ...spawns.filter(s => s.status === 'catching' && s.catch_team1_arrived_at && !s.active_opdracht_type).map(s => `c${s.id}${s.catch_team1_arrived_at}`),
+  ].join(',')
   useEffect(() => {
-    if (!fadingKey) return
+    if (!tickingKey) return
     const iv = setInterval(() => setNowMs(Date.now()), 1000)
     return () => clearInterval(iv)
-  }, [fadingKey])
+  }, [tickingKey])
 
   // Moonstone actief voor mijn team?
   const moonstoneActive = team && effects.some(e =>
@@ -280,35 +346,61 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
             const dist = position ? getDistanceMeters(position.lat, position.lon, +spawn.latitude, +spawn.longitude) : 999
             const spawnRadius = spawn.catch_radius_meters || CATCH_RADIUS_METERS
             const nearby = dist <= spawnRadius
-            const emoji = spawn.spawn_type === 'mystery' ? '❓'
-              : spawn.spawn_type === 'legendary' ? '👑'
-              : pokemon.sprite_emoji
+            const isMystery = spawn.spawn_type === 'mystery'
+            const isShiny = spawn.spawn_type === 'shiny'
+            const isLegendary = spawn.spawn_type === 'legendary'
+            const displayEmoji = isMystery ? '❓' : pokemon.sprite_emoji
+            const displayName = isMystery ? '??? (mysterieus)' : isShiny ? `✨ ${pokemon.name}` : isLegendary ? `👑 ${pokemon.name}` : pokemon.name
 
-            // Fading spawn: countdown overlay
+            // Icon kiezen op basis van staat + type
             const isFading = spawn.fade_duration_seconds && spawn.expires_at
+            const isCatchingWait = spawn.status === 'catching' && spawn.catch_team1_arrived_at && !spawn.active_opdracht_type
+            const isCatchingBattle = spawn.status === 'catching' && spawn.active_opdracht_type
+
             let spawnIcon
-            if (isFading) {
+            if (isCatchingWait) {
+              const waitSec = session?.catch_wait_seconds || 90
+              const elapsed = Math.max(0, (nowMs - new Date(spawn.catch_team1_arrived_at).getTime()) / 1000)
+              spawnIcon = makeCatchingCountdownIcon(displayEmoji, waitSec, elapsed)
+            } else if (isCatchingBattle) {
+              spawnIcon = makeBattleIcon(displayEmoji)
+            } else if (isFading) {
               const total = spawn.fade_duration_seconds
               const elapsed = Math.max(0, (nowMs - (new Date(spawn.expires_at) - total * 1000)) / 1000)
-              spawnIcon = makeCountdownIcon(emoji, total, elapsed)
+              spawnIcon = makeCountdownIcon(displayEmoji, total, elapsed)
+            } else if (isShiny) {
+              spawnIcon = makeShinyIcon(displayEmoji, 42)
+            } else if (isLegendary) {
+              spawnIcon = makeLegendaryIcon(displayEmoji, 48)
+            } else if (isMystery) {
+              spawnIcon = makeMysteryIcon(40)
             } else {
-              spawnIcon = makeEmojiIcon(emoji, 40, nearby)
+              spawnIcon = makeEmojiIcon(displayEmoji, 40, nearby)
             }
 
             const typeInfo = POKEMON_TYPES[pokemon.pokemon_type] || {}
+            const catchingLabel = isCatchingWait
+              ? `⚔️ Pokébal gegooid — ${Math.ceil(Math.max(0, (session?.catch_wait_seconds||90) - Math.max(0,(nowMs - new Date(spawn.catch_team1_arrived_at).getTime())/1000)))}s`
+              : isCatchingBattle ? '⚡ Battle bezig!' : null
+
             return (
               <Marker key={spawn.id} position={[+spawn.latitude, +spawn.longitude]}
                 icon={spawnIcon}
                 eventHandlers={{ click: () => handleSpawnClick(spawn) }}>
                 <Popup>
                   <div className="spawn-popup">
-                    <div style={{fontSize:48, marginBottom:8}}>{emoji}{spawn.spawn_type==='shiny'?' ✨':''}</div>
-                    <h4>{spawn.spawn_type==='mystery'?'???':pokemon.name}</h4>
+                    <div style={{fontSize:48, marginBottom:8}}>{displayEmoji}</div>
+                    <h4>{displayName}</h4>
                     <div className="cp">{spawn.cp} CP</div>
                     <div style={{fontSize:12,color:'#9090b0',margin:'4px 0'}}>{typeInfo.emoji} {typeInfo.label}</div>
-                    {nearby
+                    {catchingLabel && (
+                      <div style={{fontSize:12,fontWeight:700,color:'#ef4444',margin:'4px 0',padding:'4px 8px',background:'rgba(239,68,68,0.15)',borderRadius:6}}>
+                        {catchingLabel}
+                      </div>
+                    )}
+                    {nearby && !isCatchingBattle
                       ? <button style={{marginTop:8,padding:'8px 16px',background:'#7c3aed',border:'none',borderRadius:8,color:'white',fontWeight:700,cursor:'pointer',width:'100%'}} onClick={() => handleSpawnClick(spawn)}>🎯 Vangen!</button>
-                      : <div style={{fontSize:12,color:'#9090b0',marginTop:8}}>📍 {Math.round(dist)}m</div>
+                      : !nearby && <div style={{fontSize:12,color:'#9090b0',marginTop:8}}>📍 {Math.round(dist)}m</div>
                     }
                   </div>
                 </Popup>

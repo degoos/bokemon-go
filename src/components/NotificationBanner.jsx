@@ -37,12 +37,17 @@ export default function NotificationBanner({ notifications }) {
   if (!showing || !current) return null
 
   return (
-    <div className={`notif-banner ${current.type || 'info'}`} onClick={() => setShowing(false)}>
-      <span style={{ fontSize: 22 }}>{current.emoji || '📢'}</span>
-      <div>
+    <div className={`notif-banner ${current.type || 'info'}`} onClick={() => setShowing(false)}
+      style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+      <span style={{ fontSize: 22, flexShrink: 0 }}>{current.emoji || '📢'}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 800 }}>{current.title}</div>
         <div style={{ fontSize: 13, opacity: 0.8 }}>{current.message}</div>
       </div>
+      <button
+        onClick={e => { e.stopPropagation(); setShowing(false) }}
+        style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 20, cursor: 'pointer', flexShrink: 0, padding: '0 4px', lineHeight: 1 }}
+      >✕</button>
     </div>
   )
 }

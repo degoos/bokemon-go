@@ -7,7 +7,7 @@ import { useGameSession } from '../../hooks/useGameSession'
 import { usePlayerLocation } from '../../hooks/usePlayerLocation'
 import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM } from '../../lib/constants'
 import { getPolygonCenter, pointInPolygon } from '../../lib/geo'
-import { autoSpawnPokemon } from '../../lib/gameEngine'
+import { autoSpawnPokemon, buildSpawnNotification } from '../../lib/gameEngine'
 import NotificationBanner from '../../components/NotificationBanner'
 import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
@@ -103,7 +103,8 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [shopActive, setShopActive] = useState(false)
   const [challenges, setChallenges] = useState([])
   const [challengeSelectorSpawn, setChallengeSelectorSpawn] = useState(null)
-  const [pokedexTeamId, setPokedexTeamId] = useState(null)
+  // pokedexView: 'both' | <teamId>
+  const [pokedexView, setPokedexView] = useState('both')
 
   // Biome-keuze flow na speelveld opslaan
   const [showBiomeChoice, setShowBiomeChoice] = useState(false) // 'choice' | 'auto-preview' | false
@@ -275,11 +276,13 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       status: 'active',
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     })
+    const notif = buildSpawnNotification(pokemon, spawnForm.spawnType)
     await supabase.from('notifications').insert({
       game_session_id: initialSession.id,
-      title: `A wild ${pokemon.name} appeared! ${pokemon.sprite_emoji}`,
-      message: `Een wilde ${pokemon.name} is op de kaart verschenen (${cp} CP)`,
-      type: 'info', emoji: pokemon.sprite_emoji,
+      title: notif.title,
+      message: notif.message,
+      type: notif.type,
+      emoji: notif.emoji,
     })
     setPendingSpawnLoc(null)
     setMapMode('view')
@@ -366,13 +369,6 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     }
     return out
   })()
-
-  // Initialiseer pokedexTeamId zodra teams beschikbaar zijn
-  useEffect(() => {
-    if (teams.length > 0 && !pokedexTeamId) {
-      setPokedexTeamId(teams[0].id)
-    }
-  }, [teams, pokedexTeamId])
 
   const currentPhase = session?.status || 'setup'
   const pendingEvents = events.filter(e => e.status === 'pending')
@@ -810,12 +806,32 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                 </div>
                 <div className="field">
                   <label>Type</label>
-                  <select value={spawnForm.spawnType} onChange={e => setSpawnForm(f => ({ ...f, spawnType: e.target.value }))}>
-                    <option value="normal">Normaal</option>
-                    <option value="shiny">✨ Shiny</option>
-                    <option value="mystery">❓ Mystery</option>
-                    <option value="legendary">👑 Legendary</option>
-                  </select>
+                  {(() => {
+                    const remainingMin = session?.target_end_time
+                      ? Math.max(0, (new Date(session.target_end_time) - Date.now()) / 60000)
+                      : null
+                    const legendaryAllowed = remainingMin === null || remainingMin <= 10
+                    return (
+                      <>
+                        <select value={spawnForm.spawnType} onChange={e => setSpawnForm(f => ({ ...f, spawnType: e.target.value }))}>
+                          <option value="normal">⬜ Normaal</option>
+                          <option value="shiny">✨ Shiny</option>
+                          <option value="mystery">❓ Mystery</option>
+                          {legendaryAllowed && <option value="legendary">👑 Legendary</option>}
+                        </select>
+                        {!legendaryAllowed && (
+                          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4, padding: '4px 8px', background: 'var(--bg3)', borderRadius: 6 }}>
+                            👑 Legendary beschikbaar in laatste 10 min ({Math.ceil(remainingMin)} min resterend)
+                          </div>
+                        )}
+                        {!session?.target_end_time && (
+                          <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>
+                            ⚠️ Geen doeltijd ingesteld — legendary altijd beschikbaar
+                          </div>
+                        )}
+                      </>
+                    )
+                  })()}
                 </div>
                 <div className="field">
                   <label>Vangst-radius (meter)</label>
@@ -998,37 +1014,95 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
         </div>
       )}
 
-      {/* Pokédex tab — per-team overzicht */}
+      {/* Pokédex tab — beide teams of per team */}
       {tab === 'pokedex' && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Team selector */}
-          <div style={{ display: 'flex', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          {/* View toggle */}
+          <div style={{ display: 'flex', gap: 6, padding: '10px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0, overflowX: 'auto' }}>
+            <button onClick={() => setPokedexView('both')} style={{
+              padding: '8px 14px', borderRadius: 99, border: 'none', cursor: 'pointer',
+              fontWeight: 700, fontSize: 13, flexShrink: 0,
+              background: pokedexView === 'both' ? 'var(--accent)' : 'var(--card)',
+              color: pokedexView === 'both' ? '#fff' : 'var(--text2)',
+            }}>🔀 Beide teams</button>
             {teams.map(t => (
-              <button key={t.id} onClick={() => setPokedexTeamId(t.id)} style={{
-                flex: 1, padding: '10px 8px', borderRadius: 12, border: 'none', cursor: 'pointer',
-                fontWeight: 700, fontSize: 14,
-                background: pokedexTeamId === t.id ? t.color : 'var(--card)',
-                color: pokedexTeamId === t.id ? '#fff' : 'var(--text2)',
-                borderBottom: pokedexTeamId === t.id ? `3px solid ${t.color}` : '3px solid transparent',
-                boxShadow: pokedexTeamId === t.id ? `0 0 12px ${t.color}55` : 'none',
-                transition: 'all 0.15s',
-              }}>
-                {t.emoji} {t.name}
-              </button>
+              <button key={t.id} onClick={() => setPokedexView(t.id)} style={{
+                padding: '8px 14px', borderRadius: 99, border: 'none', cursor: 'pointer',
+                fontWeight: 700, fontSize: 13, flexShrink: 0,
+                background: pokedexView === t.id ? t.color : 'var(--card)',
+                color: pokedexView === t.id ? '#fff' : 'var(--text2)',
+                boxShadow: pokedexView === t.id ? `0 0 10px ${t.color}66` : 'none',
+              }}>{t.emoji} {t.name}</button>
             ))}
           </div>
-          {/* PokedexScreen voor geselecteerd team */}
-          {pokedexTeamId ? (
+
+          {/* Beide-teams view: alle gevangen pokémon met team-tags */}
+          {pokedexView === 'both' && (() => {
+            // Bouw een map: pokemon_definition_id → { def, perTeam: { teamId: count } }
+            const pokedexMap = {}
+            for (const c of catches || []) {
+              const pd = c.pokemon_definitions
+              if (!pd) continue
+              const key = pd.id || pd.name
+              if (!pokedexMap[key]) pokedexMap[key] = { def: pd, perTeam: {} }
+              pokedexMap[key].perTeam[c.team_id] = (pokedexMap[key].perTeam[c.team_id] || 0) + 1
+            }
+            const entries = Object.values(pokedexMap).sort((a, b) => {
+              const ta = Object.values(a.perTeam).reduce((s, n) => s + n, 0)
+              const tb = Object.values(b.perTeam).reduce((s, n) => s + n, 0)
+              return tb - ta
+            })
+            if (entries.length === 0) {
+              return (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ fontSize: 40 }}>📭</div>
+                  <p>Nog geen Bokémon gevangen</p>
+                </div>
+              )
+            }
+            return (
+              <div className="scroll-area">
+                {entries.map(({ def, perTeam }) => {
+                  const total = Object.values(perTeam).reduce((s, n) => s + n, 0)
+                  return (
+                    <div key={def.id || def.name} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ fontSize: 38, flexShrink: 0 }}>{def.sprite_emoji || '❓'}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
+                          {def.name}
+                          <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 400, marginLeft: 6 }}>×{total}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {teams.map(t => {
+                            const count = perTeam[t.id] || 0
+                            if (count === 0) return null
+                            return (
+                              <span key={t.id} style={{
+                                padding: '2px 9px', borderRadius: 99, fontSize: 12, fontWeight: 700,
+                                background: t.color + '33', color: t.color,
+                                border: `1px solid ${t.color}66`,
+                              }}>
+                                {t.emoji} {t.name}{count > 1 ? ` ×${count}` : ''}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
+          {/* Per-team view: gebruik PokedexScreen */}
+          {pokedexView !== 'both' && (
             <PokedexScreen
-              key={pokedexTeamId}
+              key={pokedexView}
               sessionId={initialSession.id}
-              teamId={pokedexTeamId}
+              teamId={pokedexView}
               onClose={() => setTab('dashboard')}
             />
-          ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)' }}>
-              <p>Geen teams gevonden.</p>
-            </div>
           )}
         </div>
       )}

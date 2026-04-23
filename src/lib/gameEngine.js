@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { pointInPolygon, getBoundsFromGeoJSON, randomPointInBounds } from './geo'
 
 // Game engine: berekent spelstate metrics en stelt events voor
 export async function runGameEngine(sessionId) {
@@ -89,30 +90,45 @@ export async function runGameEngine(sessionId) {
   return { metrics, suggestions }
 }
 
-// Spawn een Bokémon op een willekeurige locatie binnen het speelveld
+// Spawn een Bokémon op een willekeurige locatie binnen het speelveld,
+// rekening houdend met biome-zones (biome-type krijgt voorkeur).
 export async function autoSpawnPokemon(sessionId) {
+  // Haal speelveld EN biome-zones op in één query
   const { data: areas } = await supabase
     .from('game_areas')
     .select('*')
     .eq('game_session_id', sessionId)
-    .eq('type', 'boundary')
 
   if (!areas || areas.length === 0) return null
+  const boundary = areas.find(a => a.type === 'boundary')
+  if (!boundary) return null
 
-  const boundary = areas[0]
-  const coords = boundary.geojson?.geometry?.coordinates?.[0] || []
-  if (coords.length === 0) return null
+  // Bounding box van speelveld
+  const bounds = getBoundsFromGeoJSON(boundary.geojson)
+  const boundaryCoords = (boundary.geojson?.geometry?.coordinates?.[0] || []).map(([lon, lat]) => [lat, lon])
+  if (boundaryCoords.length === 0) return null
 
-  // Bereken bounding box
-  let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity
-  for (const [lon, lat] of coords) {
-    if (lat < minLat) minLat = lat
-    if (lat > maxLat) maxLat = lat
-    if (lon < minLon) minLon = lon
-    if (lon > maxLon) maxLon = lon
+  // Kies random punt in bounding box (max 20 pogingen om binnen speelveld te landen)
+  let lat, lon
+  for (let i = 0; i < 20; i++) {
+    const pt = randomPointInBounds(bounds)
+    if (pointInPolygon(pt.lat, pt.lon, boundaryCoords)) { lat = pt.lat; lon = pt.lon; break }
+  }
+  if (lat === undefined) {
+    // Fallback: midden van het speelveld
+    lat = (bounds.minLat + bounds.maxLat) / 2
+    lon = (bounds.minLon + bounds.maxLon) / 2
   }
 
-  // Kies random Pokémon
+  // Bepaal in welke biome dit punt valt
+  const biomes = areas.filter(a => a.type === 'biome')
+  let detectedBiomeType = null
+  for (const biome of biomes) {
+    const biomeCoords = (biome.geojson?.geometry?.coordinates?.[0] || []).map(([blon, blat]) => [blat, blon])
+    if (pointInPolygon(lat, lon, biomeCoords)) { detectedBiomeType = biome.pokemon_type; break }
+  }
+
+  // Haal alle Pokémon op
   const { data: pokemons } = await supabase
     .from('pokemon_definitions')
     .select('*')
@@ -121,12 +137,18 @@ export async function autoSpawnPokemon(sessionId) {
 
   if (!pokemons || pokemons.length === 0) return null
 
-  const pokemon = pokemons[Math.floor(Math.random() * pokemons.length)]
-  const cp = Math.floor(pokemon.cp_min + Math.random() * (pokemon.cp_max - pokemon.cp_min))
+  // Kies Pokémon: 70% kans op biome-type, 30% volledig random
+  let pokemon
+  if (detectedBiomeType && Math.random() < 0.7) {
+    const biomePool = pokemons.filter(p => p.pokemon_type === detectedBiomeType)
+    pokemon = biomePool.length > 0
+      ? biomePool[Math.floor(Math.random() * biomePool.length)]
+      : pokemons[Math.floor(Math.random() * pokemons.length)]
+  } else {
+    pokemon = pokemons[Math.floor(Math.random() * pokemons.length)]
+  }
 
-  // Random locatie in bounding box (simpel)
-  const lat = minLat + Math.random() * (maxLat - minLat)
-  const lon = minLon + Math.random() * (maxLon - minLon)
+  const cp = Math.floor(pokemon.cp_min + Math.random() * (pokemon.cp_max - pokemon.cp_min))
 
   // Bepaal spawn type
   const isShiny = Math.random() * 100 < (pokemon.shiny_chance || 5)
@@ -140,19 +162,46 @@ export async function autoSpawnPokemon(sessionId) {
     spawn_type: spawnType,
     cp,
     status: 'active',
-    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 min
+    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
   }).select().single()
 
-  // Stuur notificatie
+  // Stuur notificatie (geen naam bij mystery)
   if (spawn) {
+    const { title, message, emoji, type } = buildSpawnNotification(pokemon, spawnType)
     await supabase.from('notifications').insert({
-      game_session_id: sessionId,
-      title: `A wild ${isShiny ? '✨ shiny ' : ''}${pokemon.name} appeared!`,
-      message: `Een wilde ${isShiny ? 'glinsterende ' : ''}${pokemon.name} is op de kaart verschenen!`,
-      type: isShiny ? 'success' : 'info',
-      emoji: pokemon.sprite_emoji,
+      game_session_id: sessionId, title, message, type, emoji,
     })
   }
 
   return spawn
+}
+
+// Bouw de juiste notificatietekst op basis van spawn type
+export function buildSpawnNotification(pokemon, spawnType) {
+  switch (spawnType) {
+    case 'shiny':
+      return {
+        title: `✨ Glinsterende ${pokemon.name} verschenen!`,
+        message: `Een zeldzame shiny ${pokemon.name} is gespot op de kaart!`,
+        emoji: '✨', type: 'success',
+      }
+    case 'mystery':
+      return {
+        title: `❓ Mysterieuze Bokémon verschenen!`,
+        message: `Iets raars beweegt op de kaart... Wat zou het zijn?`,
+        emoji: '❓', type: 'info',
+      }
+    case 'legendary':
+      return {
+        title: `👑 ${pokemon.name} is neergedaald!`,
+        message: `De legendarische ${pokemon.name} staat op de kaart — dit is jullie kans!`,
+        emoji: '👑', type: 'warning',
+      }
+    default:
+      return {
+        title: `${pokemon.sprite_emoji} ${pokemon.name} verschenen!`,
+        message: `Een wilde ${pokemon.name} is op de kaart verschenen (${pokemon.cp_min}–${pokemon.cp_max} CP)`,
+        emoji: pokemon.sprite_emoji, type: 'info',
+      }
+  }
 }
