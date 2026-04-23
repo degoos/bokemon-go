@@ -252,7 +252,9 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
       {/* Header */}
       <div className="topbar">
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 22 }}>✕</button>
-        <h3>Vangst!</h3>
+        <h3 style={{ color: 'var(--text)' }}>
+          {phase === 'arriving' || phase === 'waiting' ? '🎯 Pokébal gegooid!' : phase === 'opdracht_pending' ? '⏳ Opdracht...' : phase === 'opdracht' ? '⚡ Opdracht!' : '🏁 Resultaat'}
+        </h3>
         <div />
       </div>
 

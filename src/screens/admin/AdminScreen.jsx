@@ -1042,9 +1042,8 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
           spawn={challengeSelectorSpawn}
           opdrachtType={challengeSelectorSpawn.active_opdracht_type || 1}
           challenges={challenges}
-          onAssign={(challenge) => {
-            setChallengeSelectorSpawn(null)
-          }}
+          catchWaitSeconds={session?.catch_wait_seconds || 90}
+          onAssign={() => setChallengeSelectorSpawn(null)}
           onClose={() => setChallengeSelectorSpawn(null)}
         />
       )}

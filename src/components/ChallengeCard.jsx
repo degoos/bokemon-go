@@ -64,7 +64,7 @@ export default function ChallengeCard({ opdracht, resolvedData = {}, opdrachtTyp
         marginBottom: 0,
       }}>
         <div style={{ fontSize: 40, marginBottom: 6 }}>{opdracht.emoji || '🎯'}</div>
-        <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 4 }}>{opdracht.title}</div>
+        <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 4, color: 'var(--text)' }}>{opdracht.title}</div>
         <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
           <span style={{
             fontSize: 11, padding: '2px 10px', borderRadius: 99,
