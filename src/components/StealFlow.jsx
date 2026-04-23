@@ -103,7 +103,7 @@ export default function StealFlow({ challenge, player, team, catches, onClose })
                     </div>
                     <div>
                       <div style={{ fontWeight: 800, fontSize: 16 }}>{c.pokemon_definitions?.name}</div>
-                      <div style={{ color: 'var(--warning)', fontWeight: 700 }}>{c.cp} CP</div>
+                      <div style={{ color: 'var(--warning)', fontWeight: 700 }}>{c.cp} XP</div>
                       {c.is_shiny && <div style={{ color: 'gold', fontSize: 12 }}>✨ Blinkend</div>}
                     </div>
                     <div style={{ marginLeft: 'auto', fontSize: 22 }}>→</div>

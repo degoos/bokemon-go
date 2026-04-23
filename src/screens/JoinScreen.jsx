@@ -69,13 +69,13 @@ export default function JoinScreen({ onJoin }) {
       { game_session_id: sess.id, name: adminSetup.team2Name, color: adminSetup.team2Color, emoji: adminSetup.team2Emoji },
     ])
 
-    // Admin speler aanmaken
+    // Admin trainer aanmaken
     const { data: player } = await supabase.from('players').insert({
       game_session_id: sess.id, name: adminSetup.adminName.trim(),
       is_admin: true, is_online: true,
     }).select().single()
 
-    if (!player) { setError('Fout bij aanmaken speler.'); setLoading(false); return }
+    if (!player) { setError('Fout bij aanmaken trainer.'); setLoading(false); return }
     localStorage.setItem('bokemon_player_id', player.id)
     localStorage.setItem('bokemon_session_id', sess.id)
     localStorage.setItem('bokemon_is_admin', '1')

@@ -13,6 +13,8 @@ import NotificationBanner from '../components/NotificationBanner'
 import PokeballThrow from '../components/PokeballThrow'
 import InventoryScreen from './InventoryScreen'
 import PokedexScreen from './PokedexScreen'
+import EvolutionScreen from './EvolutionScreen'
+import TournamentScreen from './TournamentScreen'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -27,7 +29,7 @@ function MapAutoCenter({ areas, position }) {
   const gpsCenteredRef = useRef(false)
   const fieldCenteredRef = useRef(false)
 
-  // Zodra GPS beschikbaar is: center op speler (eenmalig)
+  // Zodra GPS beschikbaar is: center op trainer (eenmalig)
   useEffect(() => {
     if (!position || gpsCenteredRef.current) return
     map.setView([position.lat, position.lon], DEFAULT_ZOOM)
@@ -274,7 +276,12 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
   const fieldCenter = boundary ? getPolygonCenter(boundary.geojson) : null
   const mapCenter = position ? [position.lat, position.lon] : (fieldCenter || DEFAULT_CENTER)
 
-  const showOverlay = ['catch','steal','inventory','pokedex'].includes(activeTab)
+  const currentPhase = session?.phase || session?.status || 'collecting'
+  const isTrainingPhase  = currentPhase === 'training'
+  const isTournamentPhase = currentPhase === 'tournament'
+  // Evolutie-tab zichtbaar tijdens training én toernooi
+  const showEvolutieTab = isTrainingPhase || isTournamentPhase
+  const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi'].includes(activeTab)
 
   return (
     <div className="screen">
@@ -395,7 +402,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
                   <div className="spawn-popup">
                     <div style={{fontSize:48, marginBottom:8}}>{displayEmoji}</div>
                     <h4>{displayName}</h4>
-                    <div className="cp">{spawn.cp} CP</div>
+                    <div className="xp">{spawn.cp} XP</div>
                     <div style={{fontSize:12,color:'#9090b0',margin:'4px 0'}}>{typeInfo.emoji} {typeInfo.label}</div>
                     {catchingLabel && (
                       <div style={{fontSize:12,fontWeight:700,color:'#ef4444',margin:'4px 0',padding:'4px 8px',background:'rgba(239,68,68,0.15)',borderRadius:6}}>
@@ -449,11 +456,35 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
       {activeTab === 'inventory' && (
         <InventoryScreen catches={catches} inventory={inventory} effects={effects}
           teams={teams} player={player} team={team} sessionId={session.id}
+          currentPhase={currentPhase}
           onClose={() => setActiveTab('map')} />
       )}
       {activeTab === 'pokedex' && (
         <PokedexScreen sessionId={session.id} teamId={team?.id}
           onClose={() => setActiveTab('map')} />
+      )}
+      {activeTab === 'evolutie' && (
+        <EvolutionScreen
+          sessionId={session.id}
+          team={team}
+          catches={catches}
+          inventory={inventory}
+          currentPhase={currentPhase}
+          onClose={() => setActiveTab('map')}
+        />
+      )}
+      {activeTab === 'toernooi' && (
+        <TournamentScreen
+          session={session}
+          sessionId={session.id}
+          teams={teams}
+          players={players}
+          catches={catches}
+          player={player}
+          team={team}
+          isAdmin={false}
+          onClose={() => setActiveTab('map')}
+        />
       )}
 
       {/* Pokéball throw-animatie voor de catch start */}
@@ -466,15 +497,85 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
         />
       )}
 
+      {/* Trainingsfase-banner */}
+      {isTrainingPhase && !showOverlay && (
+        <div style={{
+          position: 'absolute', top: 8, left: 8, right: 8, zIndex: 600,
+          background: 'linear-gradient(135deg, #052e16, #14532d)',
+          border: '1px solid #166534', borderRadius: 12,
+          padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 24 }}>🌿</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: '#86efac' }}>Trainingsfase</div>
+            <div style={{ fontSize: 12, color: '#4ade80' }}>Laat je Bokémon evolueren!</div>
+          </div>
+          <button
+            onClick={() => setActiveTab('evolutie')}
+            style={{
+              background: '#166534', border: 'none', borderRadius: 8,
+              color: '#86efac', fontWeight: 800, fontSize: 13,
+              padding: '8px 14px', cursor: 'pointer', flexShrink: 0,
+            }}
+          >
+            🌿 Evolueer
+          </button>
+        </div>
+      )}
+
+      {/* Toernooifase-banner */}
+      {isTournamentPhase && !showOverlay && (
+        <div style={{
+          position: 'absolute', top: 8, left: 8, right: 8, zIndex: 600,
+          background: 'linear-gradient(135deg, #1e1b4b, #312e81)',
+          border: '1px solid #6366f1', borderRadius: 12,
+          padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 24 }}>🏆</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: '#c7d2fe' }}>Toernooifase</div>
+            <div style={{ fontSize: 12, color: '#818cf8' }}>De strijd begint!</div>
+          </div>
+          <button
+            onClick={() => setActiveTab('toernooi')}
+            style={{
+              background: '#4f46e5', border: 'none', borderRadius: 8,
+              color: '#fff', fontWeight: 800, fontSize: 13,
+              padding: '8px 14px', cursor: 'pointer', flexShrink: 0,
+            }}
+          >
+            🏆 Start duel
+          </button>
+        </div>
+      )}
+
       {/* Bottom nav */}
       {!showOverlay && (
         <div className="bottombar">
           <button className={`bottombar-btn ${activeTab==='map'?'active':''}`} onClick={() => setActiveTab('map')}>
             <span className="icon">🗺️</span><span>Kaart</span>
           </button>
-          <button className="bottombar-btn" onClick={startSteal}>
-            <span className="icon">⚔️</span><span>Stelen</span>
-          </button>
+          {isTournamentPhase ? (
+            <button
+              className={`bottombar-btn ${activeTab==='toernooi'?'active':''}`}
+              onClick={() => setActiveTab('toernooi')}
+            >
+              <span className="icon" style={{ animation: 'bokePulse 1.5s ease-in-out infinite' }}>🏆</span>
+              <span>Toernooi</span>
+            </button>
+          ) : showEvolutieTab ? (
+            <button
+              className={`bottombar-btn ${activeTab==='evolutie'?'active':''}`}
+              onClick={() => setActiveTab('evolutie')}
+            >
+              <span className="icon" style={{ animation: isTrainingPhase ? 'bokePulse 1.5s ease-in-out infinite' : 'none' }}>🌿</span>
+              <span>Training</span>
+            </button>
+          ) : (
+            <button className="bottombar-btn" onClick={startSteal}>
+              <span className="icon">⚔️</span><span>Stelen</span>
+            </button>
+          )}
           <button className={`bottombar-btn ${activeTab==='inventory'?'active':''}`} onClick={() => setActiveTab('inventory')}>
             <span className="icon">🎒</span><span>Items</span>
           </button>

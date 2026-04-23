@@ -12,6 +12,7 @@ import NotificationBanner from '../../components/NotificationBanner'
 import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
 import PokedexScreen from '../PokedexScreen'
+import TournamentScreen from '../TournamentScreen'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -105,6 +106,13 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [challengeSelectorSpawn, setChallengeSelectorSpawn] = useState(null)
   // pokedexView: 'both' | <teamId>
   const [pokedexView, setPokedexView] = useState('both')
+  // Evolutieverzoeken van trainers
+  const [evoRequests, setEvoRequests] = useState([])
+  const [resolvingEvo, setResolvingEvo] = useState(null) // id van request dat verwerkt wordt
+  // Direct toewijzen Bokémon aan team (correctie/noodtoewijzing)
+  const [assignForm, setAssignForm] = useState({ pokemonId: '', teamId: '', xp: '' })
+  const [assigning, setAssigning] = useState(false)
+  const [assignSuccess, setAssignSuccess] = useState(false)
 
   // Biome-keuze flow na speelveld opslaan
   const [showBiomeChoice, setShowBiomeChoice] = useState(false) // 'choice' | 'auto-preview' | false
@@ -137,6 +145,98 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   async function refreshChallenges() {
     const { data } = await supabase.from('opdracht_definitions').select('*').order('title')
     if (data) setChallenges(data)
+  }
+
+  // ── Evolutieverzoeken laden + realtime ─────────────────────────
+  useEffect(() => {
+    if (!initialSession.id) return
+    supabase
+      .from('evolution_requests')
+      .select('*, catches(*, pokemon_definitions(*)), teams(name, emoji, color)')
+      .eq('game_session_id', initialSession.id)
+      .order('requested_at', { ascending: true })
+      .then(({ data }) => setEvoRequests(data || []))
+
+    const ch = supabase.channel(`admin-evo-${initialSession.id}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'evolution_requests',
+        filter: `game_session_id=eq.${initialSession.id}`,
+      }, async (payload) => {
+        if (payload.eventType === 'INSERT') {
+          // Haal de volledige joined record op
+          const { data } = await supabase
+            .from('evolution_requests')
+            .select('*, catches(*, pokemon_definitions(*)), teams(name, emoji, color)')
+            .eq('id', payload.new.id)
+            .single()
+          if (data) setEvoRequests(prev => [...prev, data])
+        } else if (payload.eventType === 'UPDATE') {
+          setEvoRequests(prev => prev.map(r => r.id === payload.new.id ? { ...r, ...payload.new } : r))
+        }
+      })
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [initialSession.id])
+
+  // ── Evolutieverzoek goedkeuren ─────────────────────────────────
+  async function approveEvolution(req) {
+    if (!req) return
+    setResolvingEvo(req.id)
+    const catchItem = req.catches
+
+    // 1. Evolutiestap ophogen
+    await supabase.from('catches')
+      .update({ evolution_stage: req.to_stage })
+      .eq('id', req.catch_id)
+
+    // 2. Log bijhouden
+    await supabase.from('evolution_log').insert({
+      game_session_id: initialSession.id,
+      catch_id:        req.catch_id,
+      team_id:         req.team_id,
+      from_stage:      req.from_stage,
+      to_stage:        req.to_stage,
+      used_moon_stone: req.used_moon_stone,
+    })
+
+    // 3. Request als goedgekeurd markeren
+    await supabase.from('evolution_requests')
+      .update({ status: 'approved', resolved_at: new Date().toISOString() })
+      .eq('id', req.id)
+
+    // 4. Notificatie naar het team
+    const def  = catchItem?.pokemon_definitions
+    const chain = def?.evolution_chain || []
+    const newName = chain[req.to_stage] || def?.name || 'Bokémon'
+    await supabase.from('notifications').insert({
+      game_session_id: initialSession.id,
+      target_team_id:  req.team_id,
+      title:           `⬆️ Evolutie goedgekeurd!`,
+      message:         `${def?.sprite_emoji || '⬆️'} ${chain[req.from_stage] || def?.name} is geëvolueerd naar ${newName}!`,
+      type:            'success',
+      emoji:           '⬆️',
+    })
+
+    setResolvingEvo(null)
+  }
+
+  // ── Evolutieverzoek weigeren ───────────────────────────────────
+  async function rejectEvolution(req, note = '') {
+    setResolvingEvo(req.id)
+    await supabase.from('evolution_requests')
+      .update({ status: 'rejected', resolved_at: new Date().toISOString(), admin_note: note || null })
+      .eq('id', req.id)
+
+    const def = req.catches?.pokemon_definitions
+    await supabase.from('notifications').insert({
+      game_session_id: initialSession.id,
+      target_team_id:  req.team_id,
+      title:           `❌ Evolutie geweigerd`,
+      message:         `De evolutie van ${def?.name || 'je Bokémon'} is nog niet goedgekeurd. Drink eerst het bier!`,
+      type:            'warning',
+      emoji:           '❌',
+    })
+    setResolvingEvo(null)
   }
 
   // Detecteer spawns waarbij catch-type bepaald is (solo of T2T) maar nog geen opdracht
@@ -332,9 +432,42 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     }
   }
 
+  // ── Direct toewijzen: Bokémon zonder opdracht aan team geven ──
+  async function handleDirectAssign() {
+    const pokemon = pokemons.find(p => p.id === assignForm.pokemonId)
+    const targetTeam = teams.find(t => t.id === assignForm.teamId)
+    if (!pokemon || !targetTeam) return
+    const xp = parseInt(assignForm.xp, 10)
+    if (!xp || xp < 1) return
+    setAssigning(true)
+    const chain = pokemon.evolution_chain || [pokemon.name]
+    const { error } = await supabase.from('catches').insert({
+      game_session_id: initialSession.id,
+      team_id: targetTeam.id,
+      pokemon_definition_id: pokemon.id,
+      cp: xp,
+      evolution_stage: 0,
+      is_shiny: false,
+      caught_at: new Date().toISOString(),
+    })
+    if (!error) {
+      // Notificatie naar team
+      await supabase.from('notifications').insert({
+        game_session_id: initialSession.id,
+        title: `🎁 ${pokemon.sprite_emoji || '🐾'} ${chain[0]} toegevoegd!`,
+        message: `Team Rocket heeft ${chain[0]} (${xp} XP) direct toegewezen aan ${targetTeam.name}.`,
+        type: 'success', emoji: '🎁',
+      })
+      setAssignForm({ pokemonId: '', teamId: '', xp: '' })
+      setAssignSuccess(true)
+      setTimeout(() => setAssignSuccess(false), 3000)
+    }
+    setAssigning(false)
+  }
+
   const teamScores = teams.map(t => {
     const tc = catches.filter(c => c.team_id === t.id)
-    return { ...t, pokemonCount: tc.length, totalCP: tc.reduce((sum, c) => sum + c.cp, 0) }
+    return { ...t, pokemonCount: tc.length, totalXP: tc.reduce((sum, c) => sum + c.cp, 0) }
   })
 
   // Opdracht-executie statistieken op basis van catches (catches hebben opdracht_id)
@@ -352,7 +485,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     return out
   })()
 
-  // Per-team Pokédex: { teamId: { [pokemonKey]: { name, emoji, count, topCP } } }
+  // Per-team Pokédex: { teamId: { [pokemonKey]: { name, emoji, count, topXP } } }
   const teamPokedex = (() => {
     const out = {}
     for (const t of teams) out[t.id] = {}
@@ -362,10 +495,10 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       const bucket = out[c.team_id] || (out[c.team_id] = {})
       const key = pd.id || pd.name
       if (!bucket[key]) {
-        bucket[key] = { name: pd.name, emoji: pd.sprite_emoji, count: 0, topCP: 0 }
+        bucket[key] = { name: pd.name, emoji: pd.sprite_emoji, count: 0, topXP: 0 }
       }
       bucket[key].count += 1
-      if ((c.cp || 0) > bucket[key].topCP) bucket[key].topCP = c.cp || 0
+      if ((c.cp || 0) > bucket[key].topXP) bucket[key].topXP = c.cp || 0
     }
     return out
   })()
@@ -385,23 +518,52 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
         </div>
         <div style={{
           padding: '4px 10px', borderRadius: 99, fontSize: 12, fontWeight: 700,
-          background: currentPhase === 'collecting' ? '#14350f' : currentPhase === 'setup' ? '#1e1e3a' : '#3f1515',
-          color: currentPhase === 'collecting' ? 'var(--success)' : 'var(--text2)',
+          background: currentPhase === 'collecting' ? '#14350f'
+                    : currentPhase === 'training'   ? '#1c2e1a'
+                    : currentPhase === 'tournament' ? '#2d1a0e'
+                    : currentPhase === 'setup'      ? '#1e1e3a' : '#3f1515',
+          color: currentPhase === 'collecting' ? 'var(--success)'
+               : currentPhase === 'training'   ? '#86efac'
+               : currentPhase === 'tournament' ? 'var(--warning)'
+               : 'var(--text2)',
         }}>
-          {currentPhase}
+          { currentPhase === 'collecting' ? '🟢 Verzamelfase'
+          : currentPhase === 'training'   ? '🌿 Trainingsfase'
+          : currentPhase === 'tournament' ? '🏆 Toernooifase'
+          : currentPhase === 'finished'   ? '⏹️ Afgelopen'
+          : '⚙️ Setup' }
         </div>
       </div>
 
       {/* Tab navigatie */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
-        {[['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['setup','⚙️']].map(([key, icon]) => (
-          <button key={key} onClick={() => setTab(key)} style={{
-            flex: 1, padding: '10px 0', background: 'none', border: 'none', cursor: 'pointer',
-            borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
-            color: tab === key ? 'var(--accent)' : 'var(--text2)', fontSize: 20,
-          }}>{icon}</button>
-        ))}
-      </div>
+      {(() => {
+        const pendingEvoCount = evoRequests.filter(r => r.status === 'pending').length
+        return (
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
+            {[['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['tournament','🏆'], ['setup','⚙️']].map(([key, icon]) => (
+              <button key={key} onClick={() => setTab(key)} style={{
+                flex: 1, padding: '10px 0', background: 'none', border: 'none', cursor: 'pointer',
+                borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
+                color: tab === key ? 'var(--accent)' : 'var(--text2)', fontSize: 20,
+                position: 'relative',
+              }}>
+                {icon}
+                {key === 'dashboard' && pendingEvoCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: 4, right: '18%',
+                    background: 'var(--warning)', color: '#000',
+                    borderRadius: 99, fontSize: 10, fontWeight: 900,
+                    width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    lineHeight: 1,
+                  }}>
+                    {pendingEvoCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* Dashboard */}
       {tab === 'dashboard' && (
@@ -417,7 +579,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                   </div>
                 </div>
                 <div style={{ fontSize: 28, fontWeight: 900, color: 'var(--warning)' }}>
-                  {t.totalCP} CP
+                  {t.totalXP} XP
                 </div>
               </div>
             </div>
@@ -432,7 +594,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {teams.map(t => {
                   const bucket = teamPokedex[t.id] || {}
-                  const entries = Object.values(bucket).sort((a, b) => b.count - a.count || b.topCP - a.topCP)
+                  const entries = Object.values(bucket).sort((a, b) => b.count - a.count || b.topXP - a.topXP)
                   const totalCount = entries.reduce((s, e) => s + e.count, 0)
                   return (
                     <div key={t.id} style={{
@@ -467,7 +629,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                                 }}>×{e.count}</span>
                               )}
                               <span style={{ fontSize: 10, color: 'var(--text2)' }}>
-                                {e.topCP} CP
+                                {e.topXP} XP
                               </span>
                             </div>
                           ))}
@@ -496,7 +658,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                       ⚡ {pok?.name} — {isT2T ? '⚔️ T2T opdracht nodig!' : '🎯 Solo opdracht nodig!'}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
-                      {isT2T ? 'Beide teams aanwezig — spelers wachten' : 'Één team aanwezig — spelers wachten'}
+                      {isT2T ? 'Beide teams aanwezig — trainers wachten' : 'Één team aanwezig — trainers wachten'}
                     </div>
                   </div>
                   <button onClick={() => setChallengeSelectorSpawn(s)} style={{
@@ -530,9 +692,9 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             )
           })}
 
-          {/* Online spelers */}
+          {/* Online trainers */}
           <div className="card">
-            <h3 style={{ marginBottom: 12 }}>👥 Spelers</h3>
+            <h3 style={{ marginBottom: 12 }}>👥 Trainers</h3>
             {players.map(p => (
               <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                 <div>
@@ -550,19 +712,172 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
 
           {/* Fase controls */}
           <div className="card">
-            <h3 style={{ marginBottom: 12 }}>🎮 Fase Beheer</h3>
+            <h3 style={{ marginBottom: 4 }}>🎮 Fase Beheer</h3>
+            <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
+              Huidige fase: <strong style={{ color: 'var(--text)' }}>
+                { currentPhase === 'collecting' ? '🟢 Verzamelfase'
+                : currentPhase === 'training'   ? '🌿 Trainingsfase'
+                : currentPhase === 'tournament' ? '🏆 Toernooifase'
+                : currentPhase === 'finished'   ? '⏹️ Afgelopen'
+                : '⚙️ Setup' }
+              </strong>
+            </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="btn btn-success btn-sm" onClick={() => handlePhaseChange('collecting')} disabled={currentPhase === 'collecting'}>
-                ▶️ Start Verzamelfase
+              <button
+                className="btn btn-success btn-sm"
+                onClick={() => handlePhaseChange('collecting')}
+                disabled={currentPhase === 'collecting'}
+              >
+                🟢 Start Verzamelfase
               </button>
-              <button className="btn btn-warning btn-sm" onClick={() => handlePhaseChange('tournament')} disabled={currentPhase === 'tournament'}>
-                🏆 Start Toernooi
+              <button
+                className="btn btn-sm"
+                style={{ background: '#166534', color: '#86efac', border: '1px solid #166534' }}
+                onClick={() => handlePhaseChange('training')}
+                disabled={currentPhase === 'training'}
+              >
+                🌿 Start Trainingsfase
               </button>
-              <button className="btn btn-danger btn-sm" onClick={() => handlePhaseChange('finished')} disabled={currentPhase === 'finished'}>
+              <button
+                className="btn btn-warning btn-sm"
+                onClick={() => handlePhaseChange('tournament')}
+                disabled={currentPhase === 'tournament'}
+              >
+                🏆 Start Toernooifase
+              </button>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => handlePhaseChange('finished')}
+                disabled={currentPhase === 'finished'}
+              >
                 ⏹️ Spel Afsluiten
               </button>
             </div>
           </div>
+
+          {/* ── Evolutieverzoeken ── */}
+          {(() => {
+            const pendingEvo = evoRequests.filter(r => r.status === 'pending')
+            const recentEvo  = evoRequests.filter(r => r.status !== 'pending' &&
+              r.resolved_at && Date.now() - new Date(r.resolved_at).getTime() < 60_000)
+            if (pendingEvo.length === 0 && recentEvo.length === 0) return null
+            return (
+              <div className="card" style={{ borderLeft: pendingEvo.length > 0 ? '4px solid var(--warning)' : '4px solid var(--success)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <h3 style={{ margin: 0 }}>⬆️ Evolutieverzoeken</h3>
+                  {pendingEvo.length > 0 && (
+                    <span style={{
+                      background: 'var(--warning)', color: '#000',
+                      borderRadius: 99, fontSize: 12, fontWeight: 800,
+                      padding: '2px 8px', minWidth: 22, textAlign: 'center',
+                    }}>
+                      {pendingEvo.length}
+                    </span>
+                  )}
+                </div>
+
+                {pendingEvo.map(req => {
+                  const catchItem = req.catches
+                  const def       = catchItem?.pokemon_definitions
+                  const chain     = def?.evolution_chain || []
+                  const fromName  = chain[req.from_stage] || def?.name || '?'
+                  const toName    = chain[req.to_stage]   || '?'
+                  const teamInfo  = req.teams
+                  const isResolving = resolvingEvo === req.id
+                  return (
+                    <div key={req.id} style={{
+                      background: 'var(--bg3)', borderRadius: 10, padding: 12,
+                      marginBottom: 10, border: '1px solid var(--warning)',
+                    }}>
+                      {/* Team + Pokémon */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                        <div style={{ fontSize: 36 }}>{def?.sprite_emoji || '❓'}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 800, fontSize: 15 }}>
+                              {fromName} → {toName}
+                            </span>
+                            {req.used_moon_stone && (
+                              <span style={{ fontSize: 11, background: '#facc15', color: '#000', borderRadius: 99, padding: '1px 6px', fontWeight: 700 }}>
+                                🌙 Moon Stone
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 13, color: 'var(--text2)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ color: teamInfo?.color || 'var(--text)', fontWeight: 700 }}>
+                              {teamInfo?.emoji} {teamInfo?.name}
+                            </span>
+                            {!req.used_moon_stone && def?.linked_beer && (
+                              <span>🍺 {def.linked_beer}</span>
+                            )}
+                            <span>{catchItem?.cp} XP</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+                            Aangevraagd {new Date(req.requested_at).toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Instructie voor admin */}
+                      {!req.used_moon_stone && (
+                        <div style={{ fontSize: 12, color: 'var(--warning)', fontWeight: 600, marginBottom: 8, padding: '6px 10px', background: 'rgba(234,179,8,0.08)', borderRadius: 6 }}>
+                          🍺 Bevestig dat de trainers van {teamInfo?.name} echt {def?.linked_beer} gedronken hebben.
+                        </div>
+                      )}
+                      {req.used_moon_stone && (
+                        <div style={{ fontSize: 12, color: '#facc15', fontWeight: 600, marginBottom: 8, padding: '6px 10px', background: 'rgba(250,204,21,0.08)', borderRadius: 6 }}>
+                          🌙 Moon Stone — geen bier nodig. Direct goedkeuren.
+                        </div>
+                      )}
+
+                      {/* Actieknoppen */}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn btn-success btn-sm"
+                          style={{ flex: 2, padding: '10px 0', fontSize: 15 }}
+                          disabled={isResolving}
+                          onClick={() => approveEvolution(req)}
+                        >
+                          {isResolving ? '⏳' : `✅ Goedkeuren`}
+                        </button>
+                        <button
+                          className="btn btn-danger btn-sm"
+                          style={{ flex: 1, padding: '10px 0', fontSize: 15 }}
+                          disabled={isResolving}
+                          onClick={() => rejectEvolution(req, 'Drink eerst het bier!')}
+                        >
+                          ❌
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Recent afgehandeld */}
+                {recentEvo.map(req => {
+                  const def      = req.catches?.pokemon_definitions
+                  const chain    = def?.evolution_chain || []
+                  const fromName = chain[req.from_stage] || def?.name || '?'
+                  const toName   = chain[req.to_stage]   || '?'
+                  return (
+                    <div key={req.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '6px 10px', borderRadius: 8,
+                      background: req.status === 'approved' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+                      fontSize: 13, color: req.status === 'approved' ? 'var(--success)' : 'var(--danger)',
+                      fontWeight: 600, marginBottom: 6,
+                    }}>
+                      <span>{req.status === 'approved' ? '✅' : '❌'}</span>
+                      <span>{def?.sprite_emoji} {fromName} → {toName}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text2)' }}>
+                        {req.teams?.emoji} {req.teams?.name}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
 
           {/* Mobiele shop */}
           <div className="card">
@@ -620,7 +935,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                           <span>{c.pokemon_definitions?.sprite_emoji}</span>
                           <span style={{ fontWeight: 600 }}>{c.pokemon_definitions?.name}</span>
                           {c.is_shiny && <span style={{ color: 'gold', fontSize: 10 }}>✨</span>}
-                          <span style={{ color: 'var(--text2)', fontSize: 11 }}>{c.cp}cp</span>
+                          <span style={{ color: 'var(--text2)', fontSize: 11 }}>{c.cp}xp</span>
                           {c.evolution_stage > 0 && (
                             <span style={{ fontSize: 10, color: 'var(--success)' }}>Evo{c.evolution_stage}</span>
                           )}
@@ -632,6 +947,110 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               })}
             </div>
           )}
+
+          {/* ── Direct toewijzen (correctie/noodtoewijzing) ── */}
+          <div className="card" style={{ border: '1px solid #7c3aed44' }}>
+            <h3 style={{ marginBottom: 4 }}>🎁 Direct toewijzen</h3>
+            <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 14 }}>
+              Wijs een Bokémon rechtstreeks toe aan een team — zonder opdracht. Gebruik als correctie of bij een bug in het spel.
+            </p>
+
+            {assignSuccess && (
+              <div style={{
+                background: '#14532d', border: '1px solid #22c55e', borderRadius: 8,
+                padding: '10px 14px', marginBottom: 12, color: '#86efac',
+                fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                ✅ Bokémon succesvol toegewezen!
+              </div>
+            )}
+
+            {/* Pokémon kiezen */}
+            <label style={adminLabelStyle}>🐾 Bokémon</label>
+            <select
+              style={adminSelectStyle}
+              value={assignForm.pokemonId}
+              onChange={e => setAssignForm(f => ({ ...f, pokemonId: e.target.value, xp: '' }))}
+            >
+              <option value="">— kies Bokémon —</option>
+              {pokemons.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} XP)
+                </option>
+              ))}
+            </select>
+
+            {/* XP instellen */}
+            {assignForm.pokemonId && (() => {
+              const pm = pokemons.find(p => p.id === assignForm.pokemonId)
+              return (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={adminLabelStyle}>⚡ XP waarde</label>
+                    <input
+                      type="number"
+                      min={pm?.cp_min || 1}
+                      max={pm?.cp_max || 9999}
+                      placeholder={`${pm?.cp_min}–${pm?.cp_max}`}
+                      value={assignForm.xp}
+                      onChange={e => setAssignForm(f => ({ ...f, xp: e.target.value }))}
+                      style={adminInputStyle}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, alignSelf: 'flex-end', marginBottom: 1 }}>
+                    <button
+                      onClick={() => setAssignForm(f => ({ ...f, xp: String(pm?.cp_min || '') }))}
+                      style={{ ...adminSmallBtn, background: '#1e3a5f' }}
+                    >Min</button>
+                    <button
+                      onClick={() => setAssignForm(f => ({
+                        ...f,
+                        xp: String(Math.round(((pm?.cp_min || 0) + (pm?.cp_max || 0)) / 2)),
+                      }))}
+                      style={{ ...adminSmallBtn, background: '#1e3a5f' }}
+                    >Mid</button>
+                    <button
+                      onClick={() => setAssignForm(f => ({ ...f, xp: String(pm?.cp_max || '') }))}
+                      style={{ ...adminSmallBtn, background: '#1e3a5f' }}
+                    >Max</button>
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Team kiezen */}
+            <label style={adminLabelStyle}>🏳️ Team</label>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              {teams.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setAssignForm(f => ({ ...f, teamId: t.id }))}
+                  style={{
+                    flex: 1, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
+                    border: assignForm.teamId === t.id ? `2px solid ${t.color}` : '2px solid var(--border)',
+                    background: assignForm.teamId === t.id ? t.color + '33' : 'var(--bg3)',
+                    color: t.color, fontWeight: 800, fontSize: 13,
+                  }}
+                >
+                  {t.emoji} {t.name}
+                </button>
+              ))}
+            </div>
+
+            {/* Bevestig */}
+            <button
+              onClick={handleDirectAssign}
+              disabled={assigning || !assignForm.pokemonId || !assignForm.teamId || !assignForm.xp}
+              style={{
+                width: '100%', padding: '13px 0', borderRadius: 10, cursor: 'pointer',
+                background: assigning ? '#374151' : '#7c3aed',
+                color: '#fff', fontWeight: 800, fontSize: 14, border: 'none',
+                opacity: (!assignForm.pokemonId || !assignForm.teamId || !assignForm.xp) ? 0.5 : 1,
+              }}
+            >
+              {assigning ? 'Bezig…' : '🎁 Toewijzen aan team'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -674,7 +1093,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               <Marker key={i} position={p} icon={makeEmojiIcon('📌', 20)} />
             ))}
 
-            {/* Alle spelers */}
+            {/* Alle trainers */}
             {players.filter(p => p.latitude && p.longitude).map(p => {
               const t = teams.find(t => t.id === p.team_id)
               return (
@@ -795,7 +1214,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                           <optgroup key={typeKey} label={label}>
                             {group.map(p => (
                               <option key={p.id} value={p.id}>
-                                {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} CP)
+                                {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} XP)
                               </option>
                             ))}
                           </optgroup>
@@ -859,7 +1278,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 800, fontSize: 15 }}>{pokemon.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                      {selectedSpawn.cp} CP · {selectedSpawn.spawn_type} · {selectedSpawn.catch_radius_meters || 50}m radius
+                      {selectedSpawn.cp} XP · {selectedSpawn.spawn_type} · {selectedSpawn.catch_radius_meters || 50}m radius
                       {selectedSpawn.fade_duration_seconds ? ` · ⏱ fade actief` : ''}
                     </div>
                   </div>
@@ -1105,6 +1524,23 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               onClose={() => setPokedexView('both')}
             />
           )}
+        </div>
+      )}
+
+      {/* Toernooi tab — admin-view van TournamentScreen */}
+      {tab === 'tournament' && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <TournamentScreen
+            session={session || initialSession}
+            sessionId={initialSession.id}
+            teams={teams}
+            players={players}
+            catches={catches}
+            player={null}
+            team={null}
+            isAdmin={true}
+            onClose={() => setTab('dashboard')}
+          />
         </div>
       )}
 
@@ -1398,4 +1834,24 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       )}
     </div>
   )
+}
+
+// ── Stijlconstanten voor direct-assign form ──
+const adminLabelStyle = {
+  display: 'block', fontSize: 11, color: 'var(--text2)',
+  fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em',
+}
+const adminSelectStyle = {
+  width: '100%', background: 'var(--bg3)', color: 'var(--text1)',
+  border: '1px solid var(--border)', borderRadius: 8,
+  padding: '10px 12px', fontSize: 14, marginBottom: 12,
+}
+const adminInputStyle = {
+  width: '100%', background: 'var(--bg3)', color: 'var(--text1)',
+  border: '1px solid var(--border)', borderRadius: 8,
+  padding: '10px 12px', fontSize: 14,
+}
+const adminSmallBtn = {
+  padding: '8px 10px', border: 'none', borderRadius: 6,
+  color: '#93c5fd', fontWeight: 700, fontSize: 12, cursor: 'pointer',
 }

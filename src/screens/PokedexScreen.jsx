@@ -66,7 +66,7 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
   const caughtDefCount = caughtDefIds.size
   const totalDefs     = pokemons.filter(p => !p.is_special_spawn && p.is_enabled !== false).length
 
-  // CP-verdeling per 100-CP bucket
+  // XP-verdeling per 100-CP bucket
   const cpBuckets = {}
   for (const c of catches) {
     const bucket = Math.floor((c.cp || 0) / 100) * 100
@@ -142,7 +142,7 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
                     padding: '3px 10px', borderRadius: 99, fontSize: 12, fontWeight: 700,
                     background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)',
                   }}>
-                    {count}× {range} CP
+                    {count}× {range} XP
                   </span>
                 ))}
               </div>
@@ -194,9 +194,9 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
                         <span style={{ fontSize: 10, background: 'var(--warning)', color: '#000', padding: '1px 6px', borderRadius: 99, fontWeight: 700 }}>⭐ Speciaal</span>
                       )}
                     </div>
-                    {/* Werkelijke CP */}
+                    {/* Werkelijke XP */}
                     <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--warning)', marginBottom: 2 }}>
-                      {c.cp} CP
+                      {c.cp} XP
                     </div>
                     {def.linked_beer && (
                       <div style={{ fontSize: 12, color: 'var(--text2)' }}>
@@ -238,7 +238,7 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
                       <span style={{ fontWeight: 700, color: 'var(--text)', fontSize: 15 }}>???</span>
                       <span className={`badge badge-${p.pokemon_type}`}>{typeInfo.emoji}</span>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>CP: {p.cp_min}–{p.cp_max}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>XP: {p.cp_min}–{p.cp_max}</div>
                   </div>
                 </div>
               )

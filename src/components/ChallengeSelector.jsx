@@ -26,7 +26,7 @@ function getBeschrijving(challenge, opdrachtType, resolved) {
   return previewText(tpl, resolved)
 }
 
-// Bereken hoeveel seconden admin al mag wachten, zodat countdown gesynchroniseerd is met spelers
+// Bereken hoeveel seconden Team Rocket al mag wachten, zodat countdown gesynchroniseerd is met trainers
 function computeInitialCountdown(spawn, catchWaitSeconds) {
   const t2 = spawn?.catch_team2_arrived_at ? new Date(spawn.catch_team2_arrived_at) : null
   const t1 = spawn?.catch_team1_arrived_at ? new Date(spawn.catch_team1_arrived_at) : null
@@ -243,7 +243,7 @@ export default function ChallengeSelector({ spawn, opdrachtType, challenges = []
             {beschrijvingPreview && (
               <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.3)' }}>
                 <div style={{ fontSize: 10, color: '#9c7ae8', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>
-                  {opdrachtType === 2 ? '⚔️ Wat spelers zien' : '👤 Wat spelers zien'}
+                  {opdrachtType === 2 ? '⚔️ Wat trainers zien' : '👤 Wat trainers zien'}
                 </div>
                 <p style={{ fontSize: 13, color: '#e0e0e0', lineHeight: 1.65, whiteSpace: 'pre-line', margin: 0 }}>
                   {beschrijvingPreview}

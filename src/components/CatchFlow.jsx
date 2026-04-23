@@ -239,7 +239,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
     await supabase.from('notifications').insert({
       game_session_id: spawn.game_session_id,
       title: `${team.emoji} ${team.name} heeft ${pokemon?.name} gevangen!`,
-      message: `CP: ${spawn.cp}${spawn.spawn_type === 'shiny' ? ' ✨ BLINKEND!' : ''}`,
+      message: `XP: ${spawn.cp}${spawn.spawn_type === 'shiny' ? ' ✨ BLINKEND!' : ''}`,
       type: 'success', emoji: pokemon?.sprite_emoji,
     })
     setResult('won')
@@ -283,7 +283,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 12 }}>
           <span className={`badge badge-${pokemon.pokemon_type}`}>{typeInfo.emoji} {typeInfo.label}</span>
         </div>
-        <div className="cp-big">{spawn.cp} CP</div>
+        <div className="xp-big">{spawn.cp} XP</div>
       </div>
 
       <div className="scroll-area" style={{ paddingTop: 0 }}>
@@ -419,7 +419,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
               <>
                 <div style={{ fontSize: 72, marginBottom: 16 }}>🎉</div>
                 <h2 style={{ color: 'var(--success)', marginBottom: 8 }}>Gevangen!</h2>
-                <p style={{ color: 'var(--text2)' }}>{pokemon.name} ({spawn.cp} CP) is toegevoegd aan jullie team!</p>
+                <p style={{ color: 'var(--text2)' }}>{pokemon.name} ({spawn.cp} XP) is toegevoegd aan jullie team!</p>
                 {pokemon.linked_beer && (
                   <div style={{ marginTop: 16, padding: 12, background: 'var(--card)', borderRadius: 12 }}>
                     <p style={{ color: 'var(--text2)', fontSize: 13 }}>Evolutie-bier:</p>

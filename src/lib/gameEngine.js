@@ -13,21 +13,21 @@ export async function runGameEngine(sessionId) {
     supabase.from('active_effects').select('*').eq('game_session_id', sessionId).eq('is_active', true),
   ])
 
-  if (!session || session.status !== 'collecting') return
+  if (!session || !['collecting', 'training'].includes(session.status)) return
 
   // Bereken metrics
   const teams = {}
   for (const c of catches || []) {
-    if (!teams[c.team_id]) teams[c.team_id] = { totalCP: 0, count: 0 }
-    teams[c.team_id].totalCP += c.cp
+    if (!teams[c.team_id]) teams[c.team_id] = { totalXP: 0, count: 0 }
+    teams[c.team_id].totalXP += c.cp
     teams[c.team_id].count++
   }
 
   const teamIds = Object.keys(teams)
-  const cpValues = teamIds.map(id => teams[id].totalCP)
-  const maxCP = Math.max(...cpValues, 1)
-  const minCP = Math.min(...cpValues, 0)
-  const cpDiffPercent = maxCP > 0 ? ((maxCP - minCP) / maxCP) * 100 : 0
+  const xpValues = teamIds.map(id => teams[id].totalXP)
+  const maxXP = Math.max(...xpValues, 1)
+  const minXP = Math.min(...xpValues, 0)
+  const xpDiffPercent = maxXP > 0 ? ((maxXP - minXP) / maxXP) * 100 : 0
 
   // Bereken tijdspercentage
   let timePercent = 0
@@ -39,13 +39,13 @@ export async function runGameEngine(sessionId) {
     timePercent = Math.min(100, Math.max(0, (elapsed / total) * 100))
   }
 
-  const metrics = { cpDiffPercent, timePercent, teamCount: teamIds.length }
+  const metrics = { xpDiffPercent, timePercent, teamCount: teamIds.length }
 
   // Bepaal suggesties
   const suggestions = []
 
-  if (cpDiffPercent > 40) {
-    suggestions.push({ type: 'spawn', reason: 'CP-verschil te groot', priority: 'high' })
+  if (xpDiffPercent > 40) {
+    suggestions.push({ type: 'spawn', reason: 'XP-verschil te groot', priority: 'high' })
   }
 
   if (timePercent > 20 && timePercent < 60 && Math.random() < 0.3) {
@@ -202,7 +202,7 @@ export function buildSpawnNotification(pokemon, spawnType) {
     default:
       return {
         title: `${pokemon.sprite_emoji} ${pokemon.name} verschenen!`,
-        message: `Een wilde ${pokemon.name} is op de kaart verschenen (${pokemon.cp_min}–${pokemon.cp_max} CP)`,
+        message: `Een wilde ${pokemon.name} is op de kaart verschenen (${pokemon.cp_min}–${pokemon.cp_max} XP)`,
         emoji: pokemon.sprite_emoji, type: 'info',
       }
   }
