@@ -1,14 +1,28 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+
+// Maximale leeftijd van een notificatie om getoond te worden (2 minuten)
+const MAX_AGE_MS = 2 * 60 * 1000
 
 export default function NotificationBanner({ notifications }) {
   const [current, setCurrent] = useState(null)
   const [queue, setQueue] = useState([])
   const [showing, setShowing] = useState(false)
+  // Bijhouden welke IDs al ooit in de queue zijn gestopt — overleeft re-renders
+  const seenIds = useRef(new Set())
 
   useEffect(() => {
-    if (notifications.length > 0) {
-      setQueue(prev => [...prev, ...notifications.filter(n => !prev.find(p => p.id === n.id))])
-    }
+    if (!notifications || notifications.length === 0) return
+    const now = Date.now()
+    const fresh = notifications.filter(n => {
+      if (!n?.id) return false
+      if (seenIds.current.has(n.id)) return false // al getoond
+      // Gooi oude notificaties weg (ouder dan MAX_AGE_MS)
+      if (n.created_at && now - new Date(n.created_at).getTime() > MAX_AGE_MS) return false
+      return true
+    })
+    if (fresh.length === 0) return
+    fresh.forEach(n => seenIds.current.add(n.id))
+    setQueue(prev => [...prev, ...fresh])
   }, [notifications])
 
   useEffect(() => {

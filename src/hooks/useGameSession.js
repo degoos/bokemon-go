@@ -92,10 +92,11 @@ export function useGameSession(sessionId) {
           () => fetchAll())
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `game_session_id=eq.${sessionId}` },
           (p) => {
-            // Dubbele check: Supabase realtime filters kunnen soms lekken, client-side valideren
-            if (p.new && p.new.game_session_id === sessionId) {
-              setNotifications(prev => [p.new, ...prev.slice(0, 9)])
-            }
+            const n = p.new
+            if (!n || n.game_session_id !== sessionId) return
+            // Gooi notificaties weg die ouder zijn dan 2 minuten (stale realtime events na reconnect)
+            if (n.created_at && Date.now() - new Date(n.created_at).getTime() > 2 * 60 * 1000) return
+            setNotifications(prev => [n, ...prev.slice(0, 9)])
           })
         .subscribe()
     ]
