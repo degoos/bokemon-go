@@ -7,38 +7,84 @@ export default function PokedexScreen({ sessionId, catches, onClose }) {
   const [filter, setFilter] = useState('all')
 
   useEffect(() => {
+    // Alle definities halen — we filteren pas in de UI, zodat gevangen
+    // maar inmiddels disabled/special Pokémon toch zichtbaar blijven.
     supabase.from('pokemon_definitions')
       .select('*')
-      .eq('is_enabled', true)
       .order('dex_number')
       .then(({ data }) => setPokemons(data || []))
   }, [sessionId])
 
-  // Bouw meerdere lookups zodat we altijd een match vinden:
-  //  - op pokemon_definition_id (FK kolom)
-  //  - op nested pokemon_definitions.id  (fallback als FK ontbreekt)
-  //  - op name (ultieme fallback, bv. als definities opnieuw geseed zijn)
-  const catchCountById = new Map()
+  // ── Catches indexeren met meerdere sleutels ──────────────────────
+  //   - op pokemon_definition_id (FK kolom)  → primaire match
+  //   - op nested pokemon_definitions.id     → fallback als FK ontbreekt
+  //   - op name (case-insensitive)           → laatste redmiddel
+  const catchCountById   = new Map()
   const catchCountByName = new Map()
+  // Tevens: catches waarvan we (via embed) een definitie kennen die we eventueel
+  // moeten tonen omdat de master-lijst hem niet terug-geeft (bv. verwijderde rij).
+  const embedByKey       = new Map()
   for (const c of catches || []) {
-    const id = c.pokemon_definition_id || c.pokemon_definitions?.id
-    if (id) catchCountById.set(id, (catchCountById.get(id) || 0) + 1)
-    const name = c.pokemon_definitions?.name
-    if (name) catchCountByName.set(name, (catchCountByName.get(name) || 0) + 1)
+    const id    = c.pokemon_definition_id || c.pokemon_definitions?.id || null
+    const name  = c.pokemon_definitions?.name || null
+    const nkey  = name ? name.toLowerCase() : null
+    if (id)   catchCountById.set(id,    (catchCountById.get(id)    || 0) + 1)
+    if (nkey) catchCountByName.set(nkey,(catchCountByName.get(nkey)|| 0) + 1)
+    if (c.pokemon_definitions && (id || nkey)) {
+      embedByKey.set(id || `name:${nkey}`, c.pokemon_definitions)
+    }
   }
 
   function countFor(p) {
-    return catchCountById.get(p.id) || catchCountByName.get(p.name) || 0
+    const nkey = p.name ? p.name.toLowerCase() : null
+    return catchCountById.get(p.id) || (nkey ? catchCountByName.get(nkey) : 0) || 0
   }
 
-  const filtered = pokemons.filter(p => {
-    if (p.is_special_spawn) return false
+  // Samenstellen van de Pokédex-lijst:
+  //  1. Alle "normale" Pokémon (enabled, geen special spawn) zodat lege slots zichtbaar blijven.
+  //  2. Élke gevangen Pokémon — ook als die inmiddels disabled, special, of niet meer in master-lijst is.
+  const seen   = new Set()
+  const rows   = []
+
+  for (const p of pokemons) {
+    const nkey   = p.name ? p.name.toLowerCase() : ''
+    const caught = countFor(p) > 0
+    const showAsSlot = p.is_enabled !== false && !p.is_special_spawn
+    if (!showAsSlot && !caught) continue
+    seen.add(p.id)
+    if (nkey) seen.add(`name:${nkey}`)
+    rows.push(p)
+  }
+
+  // Caught-only fallback: catches waarvan de definitie niet (meer) in `pokemons` zit.
+  for (const c of catches || []) {
+    const id   = c.pokemon_definition_id || c.pokemon_definitions?.id || null
+    const name = c.pokemon_definitions?.name || null
+    const nkey = name ? name.toLowerCase() : null
+    if (id && seen.has(id)) continue
+    if (nkey && seen.has(`name:${nkey}`)) continue
+    const embed = embedByKey.get(id || `name:${nkey}`)
+    if (!embed) continue
+    if (id)   seen.add(id)
+    if (nkey) seen.add(`name:${nkey}`)
+    rows.push(embed)
+  }
+
+  // Sorteren op dex_number (nulls achteraan), dan op naam
+  rows.sort((a, b) => {
+    const da = a.dex_number ?? 9999
+    const db = b.dex_number ?? 9999
+    if (da !== db) return da - db
+    return (a.name || '').localeCompare(b.name || '')
+  })
+
+  const filtered = rows.filter(p => {
     if (filter === 'all') return true
     return p.pokemon_type === filter
   })
 
-  const totalCaught = pokemons.filter(p => !p.is_special_spawn && countFor(p) > 0).length
-  const totalPokemons = pokemons.filter(p => !p.is_special_spawn).length
+  const totalCaught   = rows.filter(p => countFor(p) > 0).length
+  const totalPokemons = rows.length
 
   return (
     <div className="screen">
@@ -81,8 +127,10 @@ export default function PokedexScreen({ sessionId, catches, onClose }) {
           const caught = count > 0
           const chain = p.evolution_chain || []
           const typeInfo = POKEMON_TYPES[p.pokemon_type] || {}
+          const isSpecial = !!p.is_special_spawn
+          const isDisabled = p.is_enabled === false
           return (
-            <div key={p.id} className="card" style={{
+            <div key={p.id || p.name} className="card" style={{
               display: 'flex', gap: 12, alignItems: 'center',
               opacity: caught ? 1 : 0.5,
             }}>
@@ -107,19 +155,27 @@ export default function PokedexScreen({ sessionId, catches, onClose }) {
                 )}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, flexWrap: 'wrap' }}>
                   {p.dex_number && <span style={{ color: 'var(--text2)', fontSize: 12 }}>#{p.dex_number}</span>}
                   <span style={{ fontWeight: 700 }}>{caught ? p.name : '???'}</span>
                   <span className={`badge badge-${p.pokemon_type}`}>{typeInfo.emoji}</span>
+                  {caught && isSpecial && (
+                    <span style={{ fontSize: 10, background: 'var(--warning)', color: '#000', padding: '1px 6px', borderRadius: 99, fontWeight: 700 }}>speciaal</span>
+                  )}
+                  {caught && isDisabled && (
+                    <span style={{ fontSize: 10, background: 'var(--danger)', color: '#fff', padding: '1px 6px', borderRadius: 99, fontWeight: 700 }}>uit</span>
+                  )}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                  CP: {p.cp_min}–{p.cp_max}
+                  CP: {p.cp_min ?? '?'}–{p.cp_max ?? '?'}
                 </div>
                 {caught && (
                   <>
-                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
-                      🍺 {p.linked_beer}
-                    </div>
+                    {p.linked_beer && (
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                        🍺 {p.linked_beer}
+                      </div>
+                    )}
                     {chain.length > 0 && (
                       <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
                         {[p.name, ...chain].join(' → ')}
