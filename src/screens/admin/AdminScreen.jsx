@@ -86,7 +86,7 @@ function MapAutoCenter({ areas, position }) {
 }
 
 export default function AdminScreen({ player, session: initialSession, onSignOut }) {
-  const { session, teams, players, spawns, catches, events, notifications, refetch } = useGameSession(initialSession.id)
+  const { session, teams, players, spawns, events, notifications, refetch } = useGameSession(initialSession.id)
   const { position } = usePlayerLocation(player.id, initialSession.id)
   const [tab, setTab] = useState('dashboard')
   const [mapMode, setMapMode] = useState('view') // view | spawn | boundary | biome
@@ -113,6 +113,32 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [assignForm, setAssignForm] = useState({ pokemonId: '', teamId: '', xp: '' })
   const [assigning, setAssigning] = useState(false)
   const [assignSuccess, setAssignSuccess] = useState(false)
+
+  // ── Eigen catches-state voor dashboard (onafhankelijk van useGameSession) ──
+  // useGameSession.catches is mogelijk stale als de catches-tabel niet in
+  // Supabase realtime publication zit. Hier fetchen we zelf met een live
+  // subscription zodat teamScores en teamPokedex altijd up-to-date zijn.
+  const [catches, setCatches] = useState([])
+
+  useEffect(() => {
+    if (!initialSession.id) return
+    async function loadCatches() {
+      const { data } = await supabase
+        .from('catches')
+        .select('*, pokemon_definitions(*)')
+        .eq('game_session_id', initialSession.id)
+      if (data) setCatches(data)
+    }
+    loadCatches()
+
+    const ch = supabase.channel(`admin-catches-live-${initialSession.id}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'catches',
+        filter: `game_session_id=eq.${initialSession.id}`,
+      }, () => loadCatches())
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [initialSession.id])
 
   // Biome-keuze flow na speelveld opslaan
   const [showBiomeChoice, setShowBiomeChoice] = useState(false) // 'choice' | 'auto-preview' | false
