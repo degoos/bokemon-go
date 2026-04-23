@@ -137,9 +137,11 @@ export async function autoSpawnPokemon(sessionId) {
 
   if (!pokemons || pokemons.length === 0) return null
 
-  // Kies Pokémon: 70% kans op biome-type, 30% volledig random
+  // Kies Pokémon: altijd het type van de biome waarin het punt valt.
+  // Alleen als het punt buiten alle biome-zones valt (of geen biomes ingesteld),
+  // kies dan volledig random.
   let pokemon
-  if (detectedBiomeType && Math.random() < 0.7) {
+  if (detectedBiomeType) {
     const biomePool = pokemons.filter(p => p.pokemon_type === detectedBiomeType)
     pokemon = biomePool.length > 0
       ? biomePool[Math.floor(Math.random() * biomePool.length)]
