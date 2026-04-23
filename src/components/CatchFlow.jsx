@@ -1,55 +1,111 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { POKEMON_TYPES } from '../lib/constants'
+import ChallengeCard from './ChallengeCard'
 
 export default function CatchFlow({ spawn, player, team, session, onClose, onCaught }) {
-  const [phase, setPhase] = useState('arriving') // arriving → waiting → opdracht → result
+  const [phase, setPhase]           = useState('arriving') // arriving → waiting → opdracht_pending → opdracht → result
   const [waitSeconds, setWaitSeconds] = useState(session?.catch_wait_seconds || 90)
   const [opdrachtType, setOpdrachtType] = useState(null) // 1 = solo, 2 = team vs team
-  const [opdracht, setOpdracht] = useState(null)
-  const [arriving, setArriving] = useState(false) // loading state
+  const [opdracht, setOpdracht]     = useState(null)     // volledige opdracht definitie
+  const [resolvedData, setResolvedData] = useState({})   // ingevulde variabelen
+  const [result, setResult]         = useState(null)
+  const [arriving, setArriving]     = useState(false)
+  const AUTO_ASSIGN_SECONDS = session?.admin_confirm_timeout_seconds || 45
+  const [pendingSeconds, setPendingSeconds] = useState(0)
 
   const pokemon = spawn?.pokemon_definitions
 
-  // ── Wachttimer (enkel eerste team ziet dit) ──────────────────
+  // ── Wachttimer (eerste team wacht op team 2) ─────────────────
   useEffect(() => {
     if (phase !== 'waiting') return
     if (waitSeconds <= 0) {
-      // Schrijf naar DB zodat laat-aankomend team ook stopt
-      // .is() voorkomt dat type 2 overschreven wordt als team 2 net arriveerde
       supabase.from('active_spawns')
         .update({ active_opdracht_type: 1 })
         .eq('id', spawn.id)
         .is('active_opdracht_type', null)
         .then(() => {})
       setOpdrachtType(1)
-      setPhase('opdracht')
+      setPhase('opdracht_pending')
       return
     }
     const t = setTimeout(() => setWaitSeconds(s => s - 1), 1000)
     return () => clearTimeout(t)
   }, [phase, waitSeconds, spawn.id])
 
-  // ── Opdracht ophalen zodra fase start ────────────────────────
+  // ── Pending timer + auto-assign als admin niet reageert ──────
   useEffect(() => {
-    if (phase !== 'opdracht') return
-    async function fetchOpdracht() {
+    if (phase !== 'opdracht_pending') return
+    const t = setTimeout(() => setPendingSeconds(s => s + 1), 1000)
+    return () => clearTimeout(t)
+  }, [phase, pendingSeconds])
+
+  useEffect(() => {
+    if (phase !== 'opdracht_pending') return
+    if (pendingSeconds < AUTO_ASSIGN_SECONDS) return
+
+    // Admin heeft niet gereageerd → auto-assign random compatible challenge
+    async function autoAssign() {
+      const type = opdrachtType || 1
       const { data } = await supabase
         .from('opdracht_definitions')
         .select('*')
-        .eq('type', opdrachtType || 1)
+        .in('type', type === 2 ? [2, 3] : [1, 3])
         .eq('is_enabled', true)
-        .limit(20)
-      if (data && data.length > 0) {
-        setOpdracht(data[Math.floor(Math.random() * data.length)])
-      }
-    }
-    fetchOpdracht()
-  }, [phase, opdrachtType])
+        .eq('auto_assignable', true)
+      if (!data || data.length === 0) return
 
-  // ── Realtime: luister naar updates van deze spawn ────────────
+      const chosen = data[Math.floor(Math.random() * data.length)]
+      const autoResolved = {}
+      for (const v of chosen.variabelen || []) {
+        if (v.type === 'kwantitatief') {
+          autoResolved[v.naam] = v.default
+        } else if (['random_lijst', 'keuze'].includes(v.type)) {
+          autoResolved[v.naam] = v.opties[Math.floor(Math.random() * v.opties.length)]
+        }
+      }
+      await supabase.from('active_spawns').update({
+        opdracht_id: chosen.id,
+        opdracht_resolved_data: { ...autoResolved, drinks_loser: chosen.drinks_loser },
+        challenge_auto_assigned: true,
+        challenge_assigned_at: new Date().toISOString(),
+      }).eq('id', spawn.id)
+      // loadOpdracht volgt via de realtime listener hieronder
+    }
+    autoAssign()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSeconds])
+
+  // ── Laad opdracht zodra opdracht_id beschikbaar is ────────────
+  async function loadOpdracht(spawnData) {
+    const opId = spawnData.opdracht_id
+    const resolved = spawnData.opdracht_resolved_data || {}
+    const type = spawnData.active_opdracht_type || opdrachtType || 1
+    if (!opId) return
+
+    const { data } = await supabase
+      .from('opdracht_definitions')
+      .select('*')
+      .eq('id', opId)
+      .single()
+
+    if (data) {
+      setOpdracht(data)
+      setResolvedData(resolved)
+      setOpdrachtType(type)
+      setPhase('opdracht')
+    }
+  }
+
+  // ── Realtime: luister naar updates van deze spawn ─────────────
   useEffect(() => {
     if (!spawn?.id) return
+
+    // Controleer al direct of er een opdracht is
+    if (spawn.opdracht_id && spawn.active_opdracht_type) {
+      loadOpdracht(spawn)
+    }
+
     const ch = supabase.channel(`catch-${spawn.id}-${team?.id}`)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'active_spawns',
@@ -64,58 +120,72 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
           return
         }
 
-        // Eerste team wacht: team 2 is gearriveerd → Type 2 battle!
+        // Team 2 is gearriveerd → T2T battle
         if (phase === 'waiting' && updated.active_opdracht_type === 2) {
           setOpdrachtType(2)
-          setPhase('opdracht')
+          setPhase('opdracht_pending')
+        }
+
+        // Admin heeft een opdracht gekoppeld → laad en toon
+        if (updated.opdracht_id && (phase === 'opdracht_pending' || phase === 'waiting')) {
+          loadOpdracht(updated)
         }
       })
       .subscribe()
-    return () => supabase.removeChannel(ch)
-  }, [spawn?.id, team?.id, phase])
 
-  // ── Wij zijn er! ─────────────────────────────────────────────
+    return () => supabase.removeChannel(ch)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spawn?.id, team?.id])
+
+  // ── Wij zijn er! ──────────────────────────────────────────────
   async function handleMarkArrived() {
     setArriving(true)
     const now = new Date().toISOString()
 
-    // Haal meest recente staat op om race-condition te voorkomen
     const { data: fresh } = await supabase
       .from('active_spawns')
-      .select('catch_team1_arrived_at, active_opdracht_type')
+      .select('catch_team1_arrived_at, active_opdracht_type, opdracht_id, opdracht_resolved_data')
       .eq('id', spawn.id)
       .single()
 
     if (!fresh) { setArriving(false); return }
 
-    // Als er al een opdracht gestart is (timer liep af): meteen tonen
+    // Spawn heeft al een lopende opdracht (bv. timer liep al af)
     if (fresh.active_opdracht_type) {
-      setOpdrachtType(fresh.active_opdracht_type)
-      setPhase('opdracht')
+      if (fresh.opdracht_id) {
+        await loadOpdracht(fresh)
+      } else {
+        setOpdrachtType(fresh.active_opdracht_type)
+        setPhase('opdracht_pending')
+      }
       setArriving(false)
       return
     }
 
     if (!fresh.catch_team1_arrived_at) {
-      // ── Eerste team: start de wachttimer ──────────────────────
+      // Eerste team: start de wachttimer
       await supabase.from('active_spawns').update({
         catch_team1_arrived_at: now,
         status: 'catching',
       }).eq('id', spawn.id)
       setPhase('waiting')
     } else {
-      // ── Tweede team: start Type 2 battle direct! ──────────────
+      // Tweede team: start T2T direct
       await supabase.from('active_spawns').update({
         catch_team2_arrived_at: now,
         active_opdracht_type: 2,
       }).eq('id', spawn.id)
       setOpdrachtType(2)
-      setPhase('opdracht')
+      if (fresh.opdracht_id) {
+        await loadOpdracht({ ...fresh, active_opdracht_type: 2 })
+      } else {
+        setPhase('opdracht_pending')
+      }
     }
     setArriving(false)
   }
 
-  // ── Opdracht voltooid → vangst vastleggen ────────────────────
+  // ── Opdracht voltooid → vangst vastleggen ─────────────────────
   async function handleCompleteOpdracht() {
     await supabase.from('catches').insert({
       game_session_id: spawn.game_session_id,
@@ -141,7 +211,12 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
     if (onCaught) onCaught()
   }
 
-  const [result, setResult] = useState(null)
+  async function handleFailOpdracht() {
+    // Markeer opdracht als mislukt voor dit team; de spawn blijft actief zodat het andere team kan winnen
+    setResult('lost')
+    setPhase('result')
+    if (onClose) onClose()
+  }
 
   if (!pokemon) return null
   const typeInfo = POKEMON_TYPES[pokemon.pokemon_type] || {}
@@ -177,15 +252,13 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
 
         {/* Fase: aankomen */}
         {phase === 'arriving' && (
-          <div>
-            <div className="card" style={{ textAlign: 'center' }}>
-              <p style={{ color: 'var(--text2)', marginBottom: 16 }}>
-                Bevestig dat je team aanwezig is op de locatie
-              </p>
-              <button className="btn btn-primary" onClick={handleMarkArrived} disabled={arriving}>
-                {arriving ? '⏳ Even wachten...' : '📍 Wij zijn er!'}
-              </button>
-            </div>
+          <div className="card" style={{ textAlign: 'center', margin: 16 }}>
+            <p style={{ color: 'var(--text2)', marginBottom: 16 }}>
+              Bevestig dat je team aanwezig is op de locatie
+            </p>
+            <button className="btn btn-primary" onClick={handleMarkArrived} disabled={arriving}>
+              {arriving ? '⏳ Even wachten...' : '📍 Wij zijn er!'}
+            </button>
           </div>
         )}
 
@@ -212,56 +285,67 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
           </div>
         )}
 
-        {/* Fase: opdracht */}
-        {phase === 'opdracht' && (
+        {/* Fase: wachten op admin om opdracht te koppelen */}
+        {phase === 'opdracht_pending' && (
           <div>
-            {/* Battle-type banner */}
             <div style={{
-              textAlign: 'center', padding: '16px',
-              background: opdrachtType === 2 ? 'rgba(245,158,11,0.15)' : 'rgba(124,58,237,0.15)',
+              textAlign: 'center',
+              padding: '20px 16px',
+              background: opdrachtType === 2 ? 'rgba(245,158,11,0.12)' : 'rgba(124,58,237,0.12)',
               borderBottom: `2px solid ${opdrachtType === 2 ? 'var(--warning)' : 'var(--accent)'}`,
-              marginBottom: 8,
             }}>
-              <div style={{ fontSize: 28, marginBottom: 4 }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>
                 {opdrachtType === 2 ? '⚔️' : '🎯'}
               </div>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>
+              <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 4 }}>
                 {opdrachtType === 2 ? 'Team vs Team!' : 'Solo Opdracht'}
               </div>
               {opdrachtType === 2 && (
-                <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 4 }}>
-                  Beide teams zijn aanwezig — het beste team wint de Bokémon!
+                <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                  Beide teams aanwezig — beste team wint de Bokémon!
                 </div>
               )}
             </div>
+            <div className="card" style={{ textAlign: 'center', margin: 16 }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>⏳</div>
+              <p style={{ fontWeight: 700, marginBottom: 8 }}>Opdracht wordt gekozen...</p>
+              {pendingSeconds < AUTO_ASSIGN_SECONDS ? (
+                <>
+                  <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>
+                    Admin kiest de opdracht. Automatisch over:
+                  </p>
+                  <div style={{
+                    fontSize: 40, fontWeight: 900, fontVariantNumeric: 'tabular-nums',
+                    color: AUTO_ASSIGN_SECONDS - pendingSeconds <= 10 ? 'var(--danger)' : 'var(--warning)',
+                  }}>
+                    {AUTO_ASSIGN_SECONDS - pendingSeconds}
+                  </div>
+                </>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--text2)' }}>
+                  Opdracht wordt automatisch toegewezen...
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
+        {/* Fase: opdracht actief */}
+        {phase === 'opdracht' && (
+          <div>
             {opdracht ? (
-              <div className="card" style={{ textAlign: 'center' }}>
-                <h3 style={{ marginBottom: 12 }}>{opdracht.title}</h3>
-                <p style={{ color: 'var(--text2)', lineHeight: 1.6 }}>{opdracht.description}</p>
-                {opdracht.drinks_loser > 0 && (
-                  <div style={{ marginTop: 12, padding: '8px 16px', background: 'var(--bg3)', borderRadius: 10, fontSize: 14, color: 'var(--warning)' }}>
-                    🍺 Verliezer drinkt {opdracht.drinks_loser} slokken
-                  </div>
-                )}
-                {opdracht.time_limit_seconds && (
-                  <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text2)' }}>
-                    ⏱ Max {Math.floor(opdracht.time_limit_seconds / 60)}:{String(opdracht.time_limit_seconds % 60).padStart(2, '0')}
-                  </div>
-                )}
-              </div>
+              <ChallengeCard
+                opdracht={opdracht}
+                resolvedData={resolvedData}
+                opdrachtType={opdrachtType}
+                onComplete={handleCompleteOpdracht}
+                onFail={handleFailOpdracht}
+              />
             ) : (
-              <div className="card" style={{ textAlign: 'center', color: 'var(--text2)' }}>
+              <div className="card" style={{ textAlign: 'center', margin: 16, color: 'var(--text2)' }}>
                 ⏳ Opdracht laden...
               </div>
             )}
-
-            <button className="btn btn-success" style={{ margin: '0 16px 12px' }} onClick={handleCompleteOpdracht}>
-              ✅ Opdracht Voltooid — Wij Winnen!
-            </button>
-            <button className="btn btn-ghost" style={{ margin: '0 16px' }} onClick={onClose}>
-              ❌ Opdracht Mislukt
-            </button>
           </div>
         )}
 
@@ -286,7 +370,7 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
               <>
                 <div style={{ fontSize: 72, marginBottom: 16 }}>😢</div>
                 <h2 style={{ color: 'var(--danger)', marginBottom: 8 }}>Verloren!</h2>
-                <p style={{ color: 'var(--text2)' }}>Het andere team was sneller.</p>
+                <p style={{ color: 'var(--text2)' }}>Het andere team was sneller of beter.</p>
               </>
             )}
             <button className="btn btn-ghost" style={{ marginTop: 24 }} onClick={onClose}>

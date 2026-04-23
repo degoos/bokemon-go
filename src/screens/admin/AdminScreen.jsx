@@ -9,6 +9,8 @@ import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM } from '../../lib/constants
 import { getPolygonCenter, pointInPolygon } from '../../lib/geo'
 import { autoSpawnPokemon } from '../../lib/gameEngine'
 import NotificationBanner from '../../components/NotificationBanner'
+import ChallengeSelector from '../../components/ChallengeSelector'
+import ChallengeLibrary from '../../components/ChallengeLibrary'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -98,6 +100,15 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [pendingFadeSeconds, setPendingFadeSeconds] = useState(60)
   const [nowMs, setNowMs] = useState(Date.now())
   const [shopActive, setShopActive] = useState(false)
+  const [challenges, setChallenges] = useState([])
+  const [challengeSelectorSpawn, setChallengeSelectorSpawn] = useState(null)
+
+  // Biome-keuze flow na speelveld opslaan
+  const [showBiomeChoice, setShowBiomeChoice] = useState(false) // 'choice' | 'auto-preview' | false
+  const [biomeChoiceStep, setBiomeChoiceStep] = useState('choice') // 'choice' | 'auto-preview'
+  const [savedBoundaryPoints, setSavedBoundaryPoints] = useState(null)
+  const [autoZonesPreview, setAutoZonesPreview] = useState([]) // [{ points, type }]
+  const [activeAutoZoneIdx, setActiveAutoZoneIdx] = useState(null) // index van geselecteerde zone in preview
 
   // Klok-ticker voor fading spawns in admin-kaart
   const adminFadingKey = spawns.filter(s => s.fade_duration_seconds).map(s => s.id + s.expires_at).join(',')
@@ -112,11 +123,83 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     Promise.all([
       supabase.from('game_areas').select('*').eq('game_session_id', initialSession.id),
       supabase.from('pokemon_definitions').select('*').eq('is_enabled', true).eq('is_special_spawn', false),
-    ]).then(([{ data: a }, { data: p }]) => {
+      supabase.from('opdracht_definitions').select('*').order('title'),
+    ]).then(([{ data: a }, { data: p }, { data: c }]) => {
       if (a) setAreas(a)
       if (p) setPokemons(p)
+      if (c) setChallenges(c)
     })
   }, [initialSession.id])
+
+  async function refreshChallenges() {
+    const { data } = await supabase.from('opdracht_definitions').select('*').order('title')
+    if (data) setChallenges(data)
+  }
+
+  // Detecteer spawns die in 'catching' gaan zonder gekoppelde opdracht → prompt admin
+  useEffect(() => {
+    const catchingWithoutChallenge = spawns.filter(
+      s => s.status === 'catching' && s.requires_opdracht && !s.opdracht_id && !s.challenge_assigned_at
+    )
+    if (catchingWithoutChallenge.length > 0 && !challengeSelectorSpawn) {
+      setChallengeSelectorSpawn(catchingWithoutChallenge[0])
+    }
+  }, [spawns]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Genereer 6 rechthoekige biome-zones (2 rijen × 3 kolommen) over de bounding box van het speelveld
+  function generateAutoZones(pts) {
+    const lats = pts.map(([lat]) => lat)
+    const lons = pts.map(([, lon]) => lon)
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats)
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons)
+    const latMid = (minLat + maxLat) / 2
+    const l1 = minLon + (maxLon - minLon) / 3
+    const l2 = minLon + 2 * (maxLon - minLon) / 3
+    // Noord (top) → links: water, midden: vuur, rechts: elektro
+    // Zuid (bottom) → links: gras, midden: draak, rechts: geest
+    const cells = [
+      { latMin: latMid, latMax: maxLat, lonMin: minLon, lonMax: l1,     type: 'water' },
+      { latMin: latMid, latMax: maxLat, lonMin: l1,     lonMax: l2,     type: 'fire' },
+      { latMin: latMid, latMax: maxLat, lonMin: l2,     lonMax: maxLon, type: 'electric' },
+      { latMin: minLat, latMax: latMid, lonMin: minLon, lonMax: l1,     type: 'grass' },
+      { latMin: minLat, latMax: latMid, lonMin: l1,     lonMax: l2,     type: 'dragon' },
+      { latMin: minLat, latMax: latMid, lonMin: l2,     lonMax: maxLon, type: 'ghost' },
+    ]
+    return cells.map(cell => ({
+      points: [
+        [cell.latMax, cell.lonMin],
+        [cell.latMax, cell.lonMax],
+        [cell.latMin, cell.lonMax],
+        [cell.latMin, cell.lonMin],
+      ],
+      type: cell.type,
+    }))
+  }
+
+  async function saveAutoZones() {
+    for (const zone of autoZonesPreview) {
+      const coords = [...zone.points, zone.points[0]].map(([lat, lon]) => [lon, lat])
+      const geojson = { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] } }
+      const { data } = await supabase.from('game_areas').insert({
+        game_session_id: initialSession.id,
+        type: 'biome',
+        pokemon_type: zone.type,
+        name: `${POKEMON_TYPES[zone.type]?.label} Zone`,
+        geojson,
+        color: POKEMON_TYPES[zone.type]?.mapColor || '#7c3aed',
+      }).select().single()
+      if (data) setAreas(prev => [...prev, data])
+    }
+    setShowBiomeChoice(false)
+    setBiomeChoiceStep('choice')
+    setAutoZonesPreview([])
+    setSavedBoundaryPoints(null)
+  }
+
+  async function deleteBiomeZone(areaId) {
+    await supabase.from('game_areas').delete().eq('id', areaId)
+    setAreas(prev => prev.filter(a => a.id !== areaId))
+  }
 
   function detectBiomeAtPoint(latlng) {
     const biomes = areas.filter(a => a.type === 'biome')
@@ -157,6 +240,13 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       setAreas(prev => [...prev, data])
       setDrawingPoints([])
       setMapMode('view')
+      // Na speelveld opslaan → toon biome-keuze modal
+      if (mapMode === 'boundary') {
+        setSavedBoundaryPoints(drawingPoints)
+        setAutoZonesPreview(generateAutoZones(drawingPoints))
+        setBiomeChoiceStep('choice')
+        setShowBiomeChoice(true)
+      }
     }
   }
 
@@ -288,6 +378,41 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               </div>
             </div>
           ))}
+
+          {/* Opdrachten wachten op toewijzing */}
+          {spawns.filter(s => s.status === 'catching' && s.requires_opdracht && !s.opdracht_id).map(s => {
+            const pok = s.pokemon_definitions
+            const isT2T = s.active_opdracht_type === 2
+            return (
+              <div key={s.id} className="card" style={{
+                borderColor: 'var(--warning)', borderWidth: 2,
+                background: 'rgba(245,158,11,0.08)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 28 }}>{pok?.sprite_emoji || '❓'}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>
+                      ⚡ {pok?.name} — opdracht nodig!
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                      {isT2T ? '⚔️ Beide teams aanwezig' : '👤 Één team aanwezig'}
+                      {' · '}{s.active_opdracht_type ? 'Spelers wachten' : 'Timer loopt nog'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setChallengeSelectorSpawn(s)}
+                    style={{
+                      padding: '8px 14px', borderRadius: 10,
+                      background: 'var(--warning)', border: 'none',
+                      color: '#000', fontSize: 13, fontWeight: 800, cursor: 'pointer', flexShrink: 0,
+                    }}
+                  >
+                    🎯 Wijs toe
+                  </button>
+                </div>
+              </div>
+            )
+          })}
 
           {/* Online spelers */}
           <div className="card">
@@ -436,6 +561,26 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             <button className={`btn btn-sm ${mapMode === 'biome' ? 'btn-primary' : 'btn-ghost'}`} style={{ flexShrink: 0 }} onClick={() => setMapMode(mapMode === 'biome' ? 'view' : 'biome')}>
               🌿 Biome
             </button>
+            {areas.some(a => a.type === 'boundary') && (
+              <button
+                className="btn btn-sm btn-ghost"
+                style={{ flexShrink: 0 }}
+                onClick={() => {
+                  const boundary = areas.find(a => a.type === 'boundary')
+                  if (!boundary) return
+                  const coords = boundary.geojson?.geometry?.coordinates?.[0] || []
+                  const pts = coords.map(([lon, lat]) => [lat, lon])
+                  if (pts.length > 1) {
+                    setSavedBoundaryPoints(pts.slice(0, -1))
+                    setAutoZonesPreview(generateAutoZones(pts.slice(0, -1)))
+                    setBiomeChoiceStep('choice')
+                    setShowBiomeChoice(true)
+                  }
+                }}
+              >
+                🔄 Herindelen
+              </button>
+            )}
             {(mapMode === 'boundary' || mapMode === 'biome') && drawingPoints.length >= 3 && (
               <button className="btn btn-success btn-sm" style={{ flexShrink: 0 }} onClick={savePolygon}>
                 💾 Opslaan
@@ -526,6 +671,34 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                 </div>
 
                 {/* Acties: twee rijen */}
+                {/* Opdracht-status balk */}
+                {selectedSpawn.requires_opdracht && (
+                  <div style={{
+                    marginBottom: 10, padding: '8px 12px', borderRadius: 8,
+                    background: selectedSpawn.opdracht_id ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)',
+                    border: `1px solid ${selectedSpawn.opdracht_id ? 'var(--success)' : 'var(--warning)'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <div style={{ fontSize: 12 }}>
+                      {selectedSpawn.opdracht_id
+                        ? <span style={{ color: 'var(--success)' }}>✅ Opdracht gekoppeld{selectedSpawn.challenge_auto_assigned ? ' (auto)' : ''}</span>
+                        : <span style={{ color: 'var(--warning)' }}>⚡ Nog geen opdracht</span>
+                      }
+                    </div>
+                    <button
+                      onClick={() => setChallengeSelectorSpawn(selectedSpawn)}
+                      style={{
+                        padding: '4px 10px', borderRadius: 7,
+                        background: selectedSpawn.opdracht_id ? 'var(--bg2)' : 'var(--warning)',
+                        border: 'none', color: selectedSpawn.opdracht_id ? 'var(--text2)' : '#000',
+                        fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                      }}
+                    >
+                      {selectedSpawn.opdracht_id ? '🔄 Wijzig' : '🎯 Wijs toe'}
+                    </button>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: 8 }}>
                   {/* Verwijderen */}
                   <button
@@ -694,7 +867,243 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             ))}
           </div>
 
+          {/* Biome-zones beheer */}
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>🌿 Biome-zones</h3>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {areas.some(a => a.type === 'boundary') && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ width: 'auto', padding: '6px 12px', fontSize: 12 }}
+                    onClick={() => {
+                      const boundary = areas.find(a => a.type === 'boundary')
+                      if (!boundary) return
+                      const coords = boundary.geojson?.geometry?.coordinates?.[0] || []
+                      const pts = coords.map(([lon, lat]) => [lat, lon])
+                      if (pts.length > 1) {
+                        setSavedBoundaryPoints(pts.slice(0, -1)) // sluit punt eraf
+                        setAutoZonesPreview(generateAutoZones(pts.slice(0, -1)))
+                        setBiomeChoiceStep('choice')
+                        setShowBiomeChoice(true)
+                      }
+                    }}
+                  >
+                    🔄 Herindelen
+                  </button>
+                )}
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ width: 'auto', padding: '6px 12px', fontSize: 12 }}
+                  onClick={() => { setMapMode('biome'); setTab('map') }}
+                >
+                  + Zone tekenen
+                </button>
+              </div>
+            </div>
+            {areas.filter(a => a.type === 'biome').length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--text2)', textAlign: 'center', padding: '12px 0' }}>
+                Nog geen biome-zones ingesteld.<br/>
+                Teken het speelveld op de kaart om te beginnen.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {areas.filter(a => a.type === 'biome').map(area => {
+                  const typeInfo = POKEMON_TYPES[area.pokemon_type] || {}
+                  return (
+                    <div key={area.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '10px 12px', borderRadius: 10,
+                      background: (typeInfo.color || '#555') + '22',
+                      border: `1px solid ${typeInfo.color || 'var(--border)'}44`,
+                    }}>
+                      <span style={{ fontSize: 22 }}>{typeInfo.emoji || '🗺️'}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{area.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)' }}>{typeInfo.label || area.pokemon_type}</div>
+                      </div>
+                      <button
+                        onClick={() => deleteBiomeZone(area.id)}
+                        style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 18, padding: '4px 8px' }}
+                        title="Zone verwijderen"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Challenge bibliotheek */}
+          <div className="card">
+            <h3 style={{ marginBottom: 16 }}>🎯 Opdrachten</h3>
+            <ChallengeLibrary challenges={challenges} onUpdated={refreshChallenges} />
+          </div>
+
           <button className="btn btn-ghost" onClick={onSignOut}>🚪 Uitloggen</button>
+        </div>
+      )}
+
+      {/* Challenge selector modal */}
+      {challengeSelectorSpawn && (
+        <ChallengeSelector
+          spawn={challengeSelectorSpawn}
+          opdrachtType={challengeSelectorSpawn.active_opdracht_type || 1}
+          challenges={challenges}
+          onAssign={(challenge) => {
+            setChallengeSelectorSpawn(null)
+          }}
+          onClose={() => setChallengeSelectorSpawn(null)}
+        />
+      )}
+
+      {/* Biome-keuze modal — verschijnt na speelveld opslaan */}
+      {showBiomeChoice && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          zIndex: 900, padding: '0 0 env(safe-area-inset-bottom)',
+        }}>
+          <div style={{
+            background: 'var(--card)', borderRadius: '20px 20px 0 0',
+            padding: '20px 16px 28px', width: '100%', maxWidth: 480,
+            maxHeight: '85vh', overflowY: 'auto',
+          }}>
+            {biomeChoiceStep === 'choice' && (
+              <>
+                <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>🗺️</div>
+                  <h2 style={{ margin: 0, fontSize: 20 }}>Speelveld opgeslagen!</h2>
+                  <p style={{ color: 'var(--text2)', fontSize: 14, marginTop: 6 }}>
+                    Hoe wil je de biome-zones instellen?
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <button
+                    onClick={() => setBiomeChoiceStep('auto-preview')}
+                    style={{
+                      padding: '18px 16px', borderRadius: 14, border: '2px solid var(--accent)',
+                      background: 'rgba(99,102,241,0.1)', cursor: 'pointer', textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ fontSize: 22, marginBottom: 4 }}>🤖 Automatisch verdelen</div>
+                    <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                      6 zones worden automatisch aangemaakt op basis van het speelveld. Types zijn daarna aanpasbaar.
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowBiomeChoice(false)
+                      setBiomeChoiceStep('choice')
+                      setMapMode('biome')
+                      setTab('map')
+                    }}
+                    style={{
+                      padding: '18px 16px', borderRadius: 14, border: '2px solid var(--border)',
+                      background: 'var(--bg2)', cursor: 'pointer', textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ fontSize: 22, marginBottom: 4 }}>✏️ Handmatig tekenen</div>
+                    <div style={{ fontSize: 13, color: 'var(--text2)' }}>
+                      Teken zelf de zones op de kaart, één per type. Maximale controle over de indeling.
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => { setShowBiomeChoice(false); setBiomeChoiceStep('choice') }}
+                    style={{ padding: '12px', borderRadius: 14, border: 'none', background: 'none', color: 'var(--text2)', cursor: 'pointer', fontSize: 14 }}
+                  >
+                    Later instellen
+                  </button>
+                </div>
+              </>
+            )}
+
+            {biomeChoiceStep === 'auto-preview' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <button onClick={() => setBiomeChoiceStep('choice')} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 20, cursor: 'pointer', padding: '4px 8px' }}>←</button>
+                  <h2 style={{ margin: 0, fontSize: 18 }}>🤖 Automatische verdeling</h2>
+                </div>
+                <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 16 }}>
+                  Het speelveld wordt verdeeld in 6 zones (2 rijen × 3 kolommen). Tik op een zone om het type te wijzigen.
+                </p>
+
+                {/* Grid preview */}
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>↑ Noord</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4 }}>
+                    {autoZonesPreview.map((zone, idx) => {
+                      const typeInfo = POKEMON_TYPES[zone.type] || {}
+                      const isActive = activeAutoZoneIdx === idx
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => setActiveAutoZoneIdx(isActive ? null : idx)}
+                          style={{
+                            padding: '14px 8px', borderRadius: 10, border: `2px solid ${isActive ? 'white' : typeInfo.color || 'transparent'}`,
+                            background: (typeInfo.color || '#555') + '33',
+                            cursor: 'pointer', textAlign: 'center',
+                            boxShadow: isActive ? `0 0 0 2px ${typeInfo.color}` : 'none',
+                          }}
+                        >
+                          <div style={{ fontSize: 24 }}>{typeInfo.emoji}</div>
+                          <div style={{ fontSize: 11, fontWeight: 700, marginTop: 4, color: typeInfo.color }}>{typeInfo.label}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center', fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>↓ Zuid</div>
+                </div>
+
+                {/* Type-wisselaar voor actieve zone */}
+                {activeAutoZoneIdx !== null && (
+                  <div style={{ background: 'var(--bg2)', borderRadius: 12, padding: '12px', marginBottom: 16 }}>
+                    <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 10 }}>
+                      Kies type voor zone {activeAutoZoneIdx + 1}:
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {Object.entries(POKEMON_TYPES).map(([key, info]) => (
+                        <button
+                          key={key}
+                          onClick={() => {
+                            setAutoZonesPreview(prev => prev.map((z, i) => i === activeAutoZoneIdx ? { ...z, type: key } : z))
+                            setActiveAutoZoneIdx(null)
+                          }}
+                          style={{
+                            padding: '8px 12px', borderRadius: 99, border: 'none', cursor: 'pointer',
+                            fontSize: 13, fontWeight: 700,
+                            background: autoZonesPreview[activeAutoZoneIdx]?.type === key ? info.color : 'var(--bg3)',
+                            color: 'white',
+                          }}
+                        >
+                          {info.emoji} {info.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={saveAutoZones}
+                  >
+                    ✅ Zones opslaan
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ flex: 0, padding: '0 16px' }}
+                    onClick={() => { setShowBiomeChoice(false); setBiomeChoiceStep('choice') }}
+                  >
+                    Later
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
