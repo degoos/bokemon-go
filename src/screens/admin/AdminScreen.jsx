@@ -11,6 +11,7 @@ import { autoSpawnPokemon } from '../../lib/gameEngine'
 import NotificationBanner from '../../components/NotificationBanner'
 import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
+import PokedexScreen from '../PokedexScreen'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -102,6 +103,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [shopActive, setShopActive] = useState(false)
   const [challenges, setChallenges] = useState([])
   const [challengeSelectorSpawn, setChallengeSelectorSpawn] = useState(null)
+  const [pokedexTeamId, setPokedexTeamId] = useState(null)
 
   // Biome-keuze flow na speelveld opslaan
   const [showBiomeChoice, setShowBiomeChoice] = useState(false) // 'choice' | 'auto-preview' | false
@@ -309,7 +311,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     await supabase.from('notifications').insert({
       game_session_id: initialSession.id,
       title: `⚡ Event: ${eventNames[key] || key}`,
-      message: 'Admin heeft een event getriggerd!',
+      message: 'Team Rocket heeft een event getriggerd!',
       type: 'event', emoji: '⚡',
     })
   }
@@ -365,6 +367,13 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     return out
   })()
 
+  // Initialiseer pokedexTeamId zodra teams beschikbaar zijn
+  useEffect(() => {
+    if (teams.length > 0 && !pokedexTeamId) {
+      setPokedexTeamId(teams[0].id)
+    }
+  }, [teams, pokedexTeamId])
+
   const currentPhase = session?.status || 'setup'
   const pendingEvents = events.filter(e => e.status === 'pending')
 
@@ -374,7 +383,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
 
       {/* Topbar */}
       <div className="topbar">
-        <div style={{ fontWeight: 800 }}>👑 Admin</div>
+        <div style={{ fontWeight: 800 }}>👑 Team Rocket</div>
         <div style={{ fontSize: 13, color: 'var(--text2)' }}>
           Code: <strong style={{ color: 'var(--warning)' }}>{session?.game_code}</strong>
         </div>
@@ -389,7 +398,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
 
       {/* Tab navigatie */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
-        {[['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['setup','⚙️']].map(([key, icon]) => (
+        {[['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['setup','⚙️']].map(([key, icon]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             flex: 1, padding: '10px 0', background: 'none', border: 'none', cursor: 'pointer',
             borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
@@ -774,15 +783,29 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                   <label>Bokémon</label>
                   <select value={spawnForm.pokemonId} onChange={e => setSpawnForm(f => ({ ...f, pokemonId: e.target.value }))}>
                     <option value="">Kies...</option>
-                    {detectedBiomeType && <optgroup label={`── ${biomeInfo?.emoji} ${biomeInfo?.label} (aanbevolen) ──`} />}
-                    {sortedPokemons.map((p, i) => {
-                      const isFirstOfOtherType = detectedBiomeType && i > 0 && p.pokemon_type !== detectedBiomeType && sortedPokemons[i-1].pokemon_type === detectedBiomeType
-                      return (
-                        <option key={p.id} value={p.id}>
-                          {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} CP){isFirstOfOtherType ? ' ·' : ''}
-                        </option>
-                      )
-                    })}
+                    {(() => {
+                      // Groepeer per type; biome-type eerst
+                      const typeOrder = detectedBiomeType
+                        ? [detectedBiomeType, ...Object.keys(POKEMON_TYPES).filter(t => t !== detectedBiomeType)]
+                        : Object.keys(POKEMON_TYPES)
+                      return typeOrder.map(typeKey => {
+                        const group = pokemons.filter(p => p.pokemon_type === typeKey)
+                        if (group.length === 0) return null
+                        const tInfo = POKEMON_TYPES[typeKey] || {}
+                        const label = typeKey === detectedBiomeType
+                          ? `${tInfo.emoji} ${tInfo.label} (aanbevolen voor deze biome)`
+                          : `${tInfo.emoji} ${tInfo.label}`
+                        return (
+                          <optgroup key={typeKey} label={label}>
+                            {group.map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} CP)
+                              </option>
+                            ))}
+                          </optgroup>
+                        )
+                      })
+                    })()}
                   </select>
                 </div>
                 <div className="field">
@@ -972,6 +995,41 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Pokédex tab — per-team overzicht */}
+      {tab === 'pokedex' && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {/* Team selector */}
+          <div style={{ display: 'flex', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            {teams.map(t => (
+              <button key={t.id} onClick={() => setPokedexTeamId(t.id)} style={{
+                flex: 1, padding: '10px 8px', borderRadius: 12, border: 'none', cursor: 'pointer',
+                fontWeight: 700, fontSize: 14,
+                background: pokedexTeamId === t.id ? t.color : 'var(--card)',
+                color: pokedexTeamId === t.id ? '#fff' : 'var(--text2)',
+                borderBottom: pokedexTeamId === t.id ? `3px solid ${t.color}` : '3px solid transparent',
+                boxShadow: pokedexTeamId === t.id ? `0 0 12px ${t.color}55` : 'none',
+                transition: 'all 0.15s',
+              }}>
+                {t.emoji} {t.name}
+              </button>
+            ))}
+          </div>
+          {/* PokedexScreen voor geselecteerd team */}
+          {pokedexTeamId ? (
+            <PokedexScreen
+              key={pokedexTeamId}
+              sessionId={initialSession.id}
+              teamId={pokedexTeamId}
+              onClose={() => setTab('dashboard')}
+            />
+          ) : (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)' }}>
+              <p>Geen teams gevonden.</p>
+            </div>
+          )}
         </div>
       )}
 

@@ -114,7 +114,7 @@ export default function JoinScreen({ onJoin }) {
             </div>
 
             <button type="button" className="btn btn-ghost" onClick={() => { setStep('admin_setup'); setError('') }}>
-              👑 Nieuwe game aanmaken (admin)
+              👑 Nieuwe game aanmaken (Team Rocket)
             </button>
           </form>
         )}
@@ -149,9 +149,9 @@ export default function JoinScreen({ onJoin }) {
               </div>
             </div>
             <div className="field">
-              <label>Of: Admin code (Team Rocket)</label>
+              <label>Of: Team Rocket code (spelleiding)</label>
               <input value={adminKey} onChange={e => { setAdminKey(e.target.value); setSelectedTeam(null) }}
-                placeholder="Admin wachtwoord" type="password" />
+                placeholder="Team Rocket wachtwoord" type="password" />
             </div>
             {error && <p style={{ color: 'var(--danger)', textAlign: 'center', marginBottom: 12, fontSize: 14 }}>{error}</p>}
             <button className="btn btn-primary" type="submit"
@@ -167,18 +167,18 @@ export default function JoinScreen({ onJoin }) {
         {/* Admin: nieuwe game aanmaken */}
         {step === 'admin_setup' && (
           <form onSubmit={handleCreateGame}>
-            <h3 style={{ textAlign: 'center', marginBottom: 20 }}>👑 Nieuwe Game</h3>
+            <h3 style={{ textAlign: 'center', marginBottom: 20 }}>👑 Nieuwe Game — Team Rocket</h3>
             <div className="field">
-              <label>Jouw naam (admin)</label>
+              <label>Jouw naam</label>
               <input value={adminSetup.adminName}
                 onChange={e => setAdminSetup(s => ({ ...s, adminName: e.target.value }))}
                 placeholder="bijv. Professor Rocket" />
             </div>
             <div className="field">
-              <label>Admin code</label>
+              <label>Team Rocket code</label>
               <input type="password" value={adminSetup.adminPass}
                 onChange={e => setAdminSetup(s => ({ ...s, adminPass: e.target.value }))}
-                placeholder="Admin wachtwoord" />
+                placeholder="Team Rocket wachtwoord" />
             </div>
             <div className="field">
               <label>Game naam</label>

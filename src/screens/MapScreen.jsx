@@ -251,7 +251,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
               <Circle center={[position.lat, position.lon]} radius={CATCH_RADIUS_METERS}
                 pathOptions={{ color:'#facc15', fillColor:'#facc15', fillOpacity:0.08, weight:1.5, dashArray:'4,3' }} />
               <Marker position={[position.lat, position.lon]} icon={makePlayerIcon(team?.emoji||'📍', player.name, true, 32)}>
-                <Popup><div className="spawn-popup"><h4>📍 {player.name}</h4><div style={{color:'var(--text2)',fontSize:12}}>{team?.name || 'Admin'}</div></div></Popup>
+                <Popup><div className="spawn-popup"><h4>📍 {player.name}</h4><div style={{color:'var(--text2)',fontSize:12}}>{team?.name || 'Team Rocket'}</div></div></Popup>
               </Marker>
             </>
           )}
@@ -356,7 +356,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
           onClose={() => setActiveTab('map')} />
       )}
       {activeTab === 'pokedex' && (
-        <PokedexScreen sessionId={session.id} catches={catches.filter(c => c.team_id === team?.id)}
+        <PokedexScreen sessionId={session.id} teamId={team?.id}
           onClose={() => setActiveTab('map')} />
       )}
 

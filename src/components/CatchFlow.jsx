@@ -395,7 +395,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
               /* Pokébal animatie */
               <>
                 <div style={{ fontSize: 88, marginBottom: 16 }} className="pokeball-anim">⚾</div>
-                <p style={{ color: 'var(--text2)', fontSize: 14 }}>Pokébal is gegooid...</p>
+                <p style={{ color: 'var(--text2)', fontSize: 14 }}>{pokemon.name} is gevangen!</p>
               </>
             ) : result === 'won' ? (
               /* Succes */
