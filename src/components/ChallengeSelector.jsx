@@ -51,11 +51,16 @@ export default function ChallengeSelector({ spawn, opdrachtType, challenges = []
   const [assigning, setAssigning]   = useState(false)
   const [search, setSearch]         = useState('')
   const [expandedId, setExpandedId] = useState(null)
+  const [catFilter, setCatFilter]   = useState('alle')
 
-  // Filter op modus + zoek
+  const CATS = ['alle', 'Fysiek', 'Intellectueel', 'Vaardigheid', 'Sociaal', 'Creatief']
+  const CAT_EMOJI = { Fysiek: '💪', Intellectueel: '🧠', Vaardigheid: '🎯', Sociaal: '🤝', Creatief: '🎨' }
+
+  // Filter op modus + categorie + zoek
   const compatible = challenges.filter(c => {
     const ok = opdrachtType === 2 ? [2, 3].includes(c.type) : [1, 3].includes(c.type)
-    return ok && c.is_enabled && !c.vereist_content && c.title.toLowerCase().includes(search.toLowerCase())
+    const cat = catFilter === 'alle' || c.categorie === catFilter
+    return ok && c.is_enabled && !c.vereist_content && cat && c.title.toLowerCase().includes(search.toLowerCase())
   })
 
   // Selecteer eerste challenge als startpunt
@@ -161,8 +166,22 @@ export default function ChallengeSelector({ spawn, opdrachtType, challenges = []
         )}
       </div>
 
+      {/* ── Categorie filter ───────────────────────── */}
+      <div style={{ padding: '6px 14px 0', display: 'flex', gap: 5, flexWrap: 'wrap', flexShrink: 0 }}>
+        {CATS.map(c => (
+          <button key={c} onClick={() => setCatFilter(c)} style={{
+            padding: '4px 10px', borderRadius: 99, fontSize: 11, cursor: 'pointer', fontWeight: 600,
+            border: `1px solid ${catFilter === c ? '#7c3aed' : '#2a2a2a'}`,
+            background: catFilter === c ? 'rgba(124,58,237,0.25)' : '#1a1a1a',
+            color: catFilter === c ? '#c4b0ff' : '#888',
+          }}>
+            {c === 'alle' ? 'Alle' : `${CAT_EMOJI[c]} ${c}`}
+          </button>
+        ))}
+      </div>
+
       {/* ── Zoek + Random ──────────────────────────── */}
-      <div style={{ padding: '10px 14px', display: 'flex', gap: 8, flexShrink: 0 }}>
+      <div style={{ padding: '8px 14px 0', display: 'flex', gap: 8, flexShrink: 0 }}>
         <input
           type="text" placeholder="🔍 Zoek opdracht…" value={search}
           onChange={e => setSearch(e.target.value)}

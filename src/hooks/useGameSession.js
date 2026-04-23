@@ -69,6 +69,8 @@ export function useGameSession(sessionId) {
 
   useEffect(() => {
     if (!sessionId) return
+    // Reset notifications bij sessie-wissel zodat notificaties van een vorige sessie niet blijven hangen
+    setNotifications([])
     fetchAll()
 
     // Realtime subscriptions
@@ -88,8 +90,13 @@ export function useGameSession(sessionId) {
           () => fetchAll())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'events_log', filter: `game_session_id=eq.${sessionId}` },
           () => fetchAll())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `game_session_id=eq.${sessionId}` },
-          (p) => { if (p.new) setNotifications(prev => [p.new, ...prev.slice(0, 9)]) })
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `game_session_id=eq.${sessionId}` },
+          (p) => {
+            // Dubbele check: Supabase realtime filters kunnen soms lekken, client-side valideren
+            if (p.new && p.new.game_session_id === sessionId) {
+              setNotifications(prev => [p.new, ...prev.slice(0, 9)])
+            }
+          })
         .subscribe()
     ]
 
