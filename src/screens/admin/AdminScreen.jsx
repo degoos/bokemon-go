@@ -815,7 +815,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                       <>
                         <select value={spawnForm.spawnType} onChange={e => setSpawnForm(f => ({ ...f, spawnType: e.target.value }))}>
                           <option value="normal">⬜ Normaal</option>
-                          <option value="shiny">✨ Shiny</option>
+                          <option value="shiny">✨ Blinkend</option>
                           <option value="mystery">❓ Mystery</option>
                           {legendaryAllowed && <option value="legendary">👑 Legendary</option>}
                         </select>

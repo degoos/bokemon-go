@@ -230,7 +230,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
     await supabase.from('notifications').insert({
       game_session_id: spawn.game_session_id,
       title: `${team.emoji} ${team.name} heeft ${pokemon?.name} gevangen!`,
-      message: `CP: ${spawn.cp}${spawn.spawn_type === 'shiny' ? ' ✨ SHINY!' : ''}`,
+      message: `CP: ${spawn.cp}${spawn.spawn_type === 'shiny' ? ' ✨ BLINKEND!' : ''}`,
       type: 'success', emoji: pokemon?.sprite_emoji,
     })
     setResult('won')
@@ -269,7 +269,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
           {spawn.spawn_type === 'mystery' ? '❓' : pokemon.sprite_emoji}
         </div>
         {spawn.spawn_type !== 'mystery' && (
-          <h2 style={{ marginBottom: 8 }}>{spawn.spawn_type === 'shiny' ? '✨ ' : ''}{pokemon.name}</h2>
+          <h2 style={{ marginBottom: 8 }}>{spawn.spawn_type === 'shiny' ? '✨ Blinkende ' : ''}{pokemon.name}</h2>
         )}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 12 }}>
           <span className={`badge badge-${pokemon.pokemon_type}`}>{typeInfo.emoji} {typeInfo.label}</span>

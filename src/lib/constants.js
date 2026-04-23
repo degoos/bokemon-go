@@ -18,7 +18,7 @@ export const TYPE_ADVANTAGES = {
 
 export const SPAWN_TYPES = {
   normal:    { label: 'Normaal',   emoji: '' },
-  shiny:     { label: 'Shiny ✨',  emoji: '✨' },
+  shiny:     { label: 'Blinkend ✨', emoji: '✨' },
   mystery:   { label: 'Mystery',   emoji: '❓' },
   legendary: { label: 'Legendary', emoji: '👑' },
   special:   { label: 'Speciaal',  emoji: '⭐' },

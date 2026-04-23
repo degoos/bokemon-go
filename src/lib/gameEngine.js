@@ -181,8 +181,8 @@ export function buildSpawnNotification(pokemon, spawnType) {
   switch (spawnType) {
     case 'shiny':
       return {
-        title: `✨ Glinsterende ${pokemon.name} verschenen!`,
-        message: `Een zeldzame shiny ${pokemon.name} is gespot op de kaart!`,
+        title: `✨ Blinkende ${pokemon.name} verschenen!`,
+        message: `Een zeldzame blinkende ${pokemon.name} is gespot op de kaart!`,
         emoji: '✨', type: 'success',
       }
     case 'mystery':

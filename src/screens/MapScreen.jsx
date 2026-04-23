@@ -350,7 +350,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
             const isShiny = spawn.spawn_type === 'shiny'
             const isLegendary = spawn.spawn_type === 'legendary'
             const displayEmoji = isMystery ? '❓' : pokemon.sprite_emoji
-            const displayName = isMystery ? '??? (mysterieus)' : isShiny ? `✨ ${pokemon.name}` : isLegendary ? `👑 ${pokemon.name}` : pokemon.name
+            const displayName = isMystery ? '??? (mysterieus)' : isShiny ? `✨ Blinkende ${pokemon.name}` : isLegendary ? `👑 ${pokemon.name}` : pokemon.name
 
             // Icon kiezen op basis van staat + type
             const isFading = spawn.fade_duration_seconds && spawn.expires_at
@@ -458,7 +458,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
           emoji={throwingAt.spawn_type === 'mystery' ? '❓'
                : throwingAt.spawn_type === 'legendary' ? '👑'
                : (throwingAt.pokemon_definitions?.sprite_emoji || '❓')}
-          label={throwingAt.spawn_type === 'shiny' ? '✨ SHINY! ✨' : 'GO!'}
+          label={throwingAt.spawn_type === 'shiny' ? '✨ BLINKEND! ✨' : 'GO!'}
           onComplete={handleThrowDone}
         />
       )}
