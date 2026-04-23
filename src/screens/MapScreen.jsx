@@ -237,16 +237,20 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
     const radius = spawn.catch_radius_meters || CATCH_RADIUS_METERS
     const dist = getDistanceMeters(position.lat, position.lon, +spawn.latitude, +spawn.longitude)
     if (dist > radius) return
-    // Toon eerst de pokeball-throw animatie, daarna pas de catch-flow
     setThrowingAt(spawn)
   }
 
-  function handleThrowDone() {
+  // Timer voor pokeball-animatie zit hier (niet in PokeballThrow) zodat
+  // realtime re-renders de timer nooit resetten.
+  useEffect(() => {
     if (!throwingAt) return
-    setActiveCatch(throwingAt)
-    setActiveTab('catch')
-    setThrowingAt(null)
-  }
+    const t = setTimeout(() => {
+      setActiveCatch(throwingAt)
+      setActiveTab('catch')
+      setThrowingAt(null)
+    }, 1300)
+    return () => clearTimeout(t)
+  }, [throwingAt])
 
   async function startSteal() {
     if (!team) return
@@ -459,7 +463,6 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
                : throwingAt.spawn_type === 'legendary' ? '👑'
                : (throwingAt.pokemon_definitions?.sprite_emoji || '❓')}
           label={throwingAt.spawn_type === 'shiny' ? '✨ BLINKEND! ✨' : 'GO!'}
-          onComplete={handleThrowDone}
         />
       )}
 

@@ -1095,13 +1095,14 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             )
           })()}
 
-          {/* Per-team view: gebruik PokedexScreen */}
+          {/* Per-team view: gebruik PokedexScreen embedded (zonder eigen topbar/wrapper) */}
           {pokedexView !== 'both' && (
             <PokedexScreen
               key={pokedexView}
               sessionId={initialSession.id}
               teamId={pokedexView}
-              onClose={() => setTab('dashboard')}
+              embedded={true}
+              onClose={() => setPokedexView('both')}
             />
           )}
         </div>

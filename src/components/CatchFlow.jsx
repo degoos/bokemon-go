@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { POKEMON_TYPES } from '../lib/constants'
 import ChallengeCard from './ChallengeCard'
+import PokeballThrow from './PokeballThrow'
 
 // NIET session.admin_confirm_timeout_seconds gebruiken (default=15, bedoeld voor iets anders)
 const AUTO_ASSIGN_SECONDS = 60
@@ -31,7 +32,8 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
   const [arriving, setArriving]       = useState(false)
   const [pendingSeconds, setPendingSeconds] = useState(0)
   const [battleIntro, setBattleIntro] = useState(false)
-  const [pokeballDone, setPokeballDone] = useState(false)
+  // winPhase: 'throw' → 'shake' → 'done'
+  const [winPhase, setWinPhase] = useState('throw')
 
   // Team 1 is er al wanneer wij (team 2) de CatchFlow openen → urgency countdown
   const team1AlreadyThere = !!spawn?.catch_team1_arrived_at && !spawn?.active_opdracht_type
@@ -57,12 +59,19 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
     return () => clearTimeout(t)
   }, [phase, urgentSeconds])
 
-  // ── Pokéball animatie → succes na 2.5s ──────────────────────
+  // ── Win-animatie fases (timer zit hier, niet in PokeballThrow) ──
+  // Fase 1 'throw': pokébal vliegt naar Pokémon (1.3s)
   useEffect(() => {
-    if (result !== 'won') return
-    const t = setTimeout(() => setPokeballDone(true), 2500)
+    if (result !== 'won' || winPhase !== 'throw') return
+    const t = setTimeout(() => setWinPhase('shake'), 1300)
     return () => clearTimeout(t)
-  }, [result])
+  }, [result, winPhase])
+  // Fase 2 'shake': bal dribbelt heen en weer (2.5s)
+  useEffect(() => {
+    if (result !== 'won' || winPhase !== 'shake') return
+    const t = setTimeout(() => setWinPhase('done'), 2500)
+    return () => clearTimeout(t)
+  }, [result, winPhase])
 
   // ── Wachttimer (eerste team wacht op team 2) ─────────────────
   useEffect(() => {
@@ -391,14 +400,22 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
         {/* Fase: resultaat */}
         {phase === 'result' && (
           <div style={{ textAlign: 'center', padding: 24 }}>
-            {result === 'won' && !pokeballDone ? (
-              /* Pokébal animatie */
+            {result === 'won' && winPhase === 'throw' ? (
+              /* Fase 1: pokébal vliegt naar Pokémon (fullscreen overlay) */
+              <PokeballThrow
+                emoji={spawn.spawn_type === 'mystery' ? '❓'
+                     : spawn.spawn_type === 'legendary' ? '👑'
+                     : pokemon.sprite_emoji}
+                label={spawn.spawn_type === 'shiny' ? '✨ BLINKEND! ✨' : 'GO!'}
+              />
+            ) : result === 'won' && winPhase === 'shake' ? (
+              /* Fase 2: bal dribbelt */
               <>
                 <div style={{ fontSize: 88, marginBottom: 16 }} className="pokeball-anim">⚾</div>
                 <p style={{ color: 'var(--text2)', fontSize: 14 }}>{pokemon.name} is gevangen!</p>
               </>
             ) : result === 'won' ? (
-              /* Succes */
+              /* Fase 3: succes */
               <>
                 <div style={{ fontSize: 72, marginBottom: 16 }}>🎉</div>
                 <h2 style={{ color: 'var(--success)', marginBottom: 8 }}>Gevangen!</h2>
