@@ -339,11 +339,9 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
 
       {/* Overlays */}
       {activeTab === 'catch' && activeCatch && (
-        <CatchFlow spawn={activeCatch} player={player} team={team} session={session}
+        <CatchFlow spawn={activeCatch} player={player} team={team} teams={teams} session={session}
           onClose={() => { setActiveCatch(null); setActiveTab('map') }}
           onCaught={() => {
-            // Expliciete refetch als vangnet naast de realtime subscription —
-            // garandeert dat de catches-lijst direct up-to-date is in Pokédex + Inventory
             refetch()
             setTimeout(() => { setActiveCatch(null); setActiveTab('map') }, 2500)
           }} />

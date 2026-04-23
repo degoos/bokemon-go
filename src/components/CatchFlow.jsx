@@ -4,7 +4,7 @@ import { POKEMON_TYPES } from '../lib/constants'
 import ChallengeCard from './ChallengeCard'
 
 // NIET session.admin_confirm_timeout_seconds gebruiken (default=15, bedoeld voor iets anders)
-const AUTO_ASSIGN_SECONDS = 45
+const AUTO_ASSIGN_SECONDS = 60
 
 const POKEBALL_CSS = `
 @keyframes pokeball-shake {
@@ -21,7 +21,7 @@ const POKEBALL_CSS = `
 .pokeball-anim { animation: pokeball-shake 0.9s ease-in-out infinite; display:inline-block; }
 `
 
-export default function CatchFlow({ spawn, player, team, session, onClose, onCaught }) {
+export default function CatchFlow({ spawn, player, team, teams = [], session, onClose, onCaught }) {
   const [phase, setPhase]             = useState('arriving')
   const [waitSeconds, setWaitSeconds] = useState(session?.catch_wait_seconds || 90)
   const [opdrachtType, setOpdrachtType] = useState(null)
@@ -194,6 +194,18 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
 
     if (!fresh.catch_team1_arrived_at) {
       await supabase.from('active_spawns').update({ catch_team1_arrived_at: now, status: 'catching' }).eq('id', spawn.id)
+      // Stuur notificatie naar het andere team zodat zij weten dat ze zich moeten haasten
+      const waitSec = session?.catch_wait_seconds || 90
+      const otherTeam = teams.find(t => t.id !== team.id)
+      if (otherTeam) {
+        await supabase.from('notifications').insert({
+          game_session_id: spawn.game_session_id,
+          target_team_id: otherTeam.id,
+          title: `⚡ ${team.emoji} ${team.name} gooide een Pokébal!`,
+          message: `${pokemon?.name || 'Bokémon'} wordt gevangen! Kom snel — jullie hebben ${waitSec} seconden voor een T2T battle!`,
+          type: 'warning', emoji: '🏃',
+        })
+      }
       setPhase('waiting')
     } else {
       await supabase.from('active_spawns').update({ catch_team2_arrived_at: now, active_opdracht_type: 2 }).eq('id', spawn.id)

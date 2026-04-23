@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
-const AUTO_ASSIGN_SECONDS = 45
+const AUTO_ASSIGN_SECONDS = 60
 
 function buildDefaultResolved(variabelen) {
   const resolved = {}

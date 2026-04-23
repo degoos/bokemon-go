@@ -136,13 +136,19 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     if (data) setChallenges(data)
   }
 
-  // Detecteer spawns die in 'catching' gaan zonder gekoppelde opdracht → prompt admin
+  // Detecteer spawns waarbij catch-type bepaald is (solo of T2T) maar nog geen opdracht
+  // Toon popup ALLEEN als active_opdracht_type al gezet is (wachttijd voorbij of beide teams aanwezig)
   useEffect(() => {
-    const catchingWithoutChallenge = spawns.filter(
-      s => s.status === 'catching' && s.requires_opdracht && !s.opdracht_id && !s.challenge_assigned_at
+    const readyWithoutChallenge = spawns.filter(
+      s => s.status === 'catching' &&
+           s.requires_opdracht &&
+           !s.opdracht_id &&
+           !s.challenge_assigned_at &&
+           s.active_opdracht_type !== null &&
+           s.active_opdracht_type !== undefined
     )
-    if (catchingWithoutChallenge.length > 0 && !challengeSelectorSpawn) {
-      setChallengeSelectorSpawn(catchingWithoutChallenge[0])
+    if (readyWithoutChallenge.length > 0 && !challengeSelectorSpawn) {
+      setChallengeSelectorSpawn(readyWithoutChallenge[0])
     }
   }, [spawns]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -469,36 +475,51 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             )}
           </div>
 
-          {/* Opdrachten wachten op toewijzing */}
-          {spawns.filter(s => s.status === 'catching' && s.requires_opdracht && !s.opdracht_id).map(s => {
+          {/* Opdrachten wachten op toewijzing (enkel als type bepaald is) */}
+          {spawns.filter(s =>
+            s.status === 'catching' && s.requires_opdracht && !s.opdracht_id && !s.challenge_assigned_at &&
+            s.active_opdracht_type !== null && s.active_opdracht_type !== undefined
+          ).map(s => {
             const pok = s.pokemon_definitions
             const isT2T = s.active_opdracht_type === 2
             return (
-              <div key={s.id} className="card" style={{
-                borderColor: 'var(--warning)', borderWidth: 2,
-                background: 'rgba(245,158,11,0.08)',
-              }}>
+              <div key={s.id} className="card" style={{ borderColor: 'var(--warning)', borderWidth: 2, background: 'rgba(245,158,11,0.08)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 28 }}>{pok?.sprite_emoji || '❓'}</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 700, fontSize: 14 }}>
-                      ⚡ {pok?.name} — opdracht nodig!
+                      ⚡ {pok?.name} — {isT2T ? '⚔️ T2T opdracht nodig!' : '🎯 Solo opdracht nodig!'}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
-                      {isT2T ? '⚔️ Beide teams aanwezig' : '👤 Één team aanwezig'}
-                      {' · '}{s.active_opdracht_type ? 'Spelers wachten' : 'Timer loopt nog'}
+                      {isT2T ? 'Beide teams aanwezig — spelers wachten' : 'Één team aanwezig — spelers wachten'}
                     </div>
                   </div>
-                  <button
-                    onClick={() => setChallengeSelectorSpawn(s)}
-                    style={{
-                      padding: '8px 14px', borderRadius: 10,
-                      background: 'var(--warning)', border: 'none',
-                      color: '#000', fontSize: 13, fontWeight: 800, cursor: 'pointer', flexShrink: 0,
-                    }}
-                  >
-                    🎯 Wijs toe
-                  </button>
+                  <button onClick={() => setChallengeSelectorSpawn(s)} style={{
+                    padding: '8px 14px', borderRadius: 10, background: 'var(--warning)',
+                    border: 'none', color: '#000', fontSize: 13, fontWeight: 800, cursor: 'pointer', flexShrink: 0,
+                  }}>🎯 Wijs toe</button>
+                </div>
+              </div>
+            )
+          })}
+
+          {/* Spawns waarbij wachttijd loopt (team 1 er, team 2 nog onderweg) */}
+          {spawns.filter(s =>
+            s.status === 'catching' && (s.active_opdracht_type === null || s.active_opdracht_type === undefined)
+          ).map(s => {
+            const pok = s.pokemon_definitions
+            const elapsed = s.catch_team1_arrived_at ? Math.floor((Date.now() - new Date(s.catch_team1_arrived_at).getTime()) / 1000) : 0
+            const remaining = Math.max(0, (session?.catch_wait_seconds || 90) - elapsed)
+            return (
+              <div key={s.id} className="card" style={{ borderColor: 'var(--info)', background: 'rgba(59,130,246,0.06)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 28 }}>{pok?.sprite_emoji || '❓'}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>⏳ {pok?.name} — wacht op team 2</div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                      Nog {remaining}s · Opdracht toewijzen wordt straks gevraagd
+                    </div>
+                  </div>
                 </div>
               </div>
             )
@@ -556,9 +577,56 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
           </div>
 
           {/* Auto spawn */}
-          <button className="btn btn-ghost" onClick={() => autoSpawnPokemon(initialSession.id)}>
-            🎲 Gooi Random Spawn
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => autoSpawnPokemon(initialSession.id)}>
+              🎲 Random Spawn
+            </button>
+            <button className="btn btn-danger btn-sm" style={{ flex: 1 }} onClick={async () => {
+              if (!window.confirm('Alle actieve spawns verwijderen?')) return
+              await supabase.from('active_spawns')
+                .update({ status: 'expired' })
+                .in('status', ['active', 'catching'])
+                .eq('game_session_id', initialSession.id)
+            }}>
+              🗑️ Wis alle spawns
+            </button>
+          </div>
+
+          {/* Pokédex per team — overzicht gevangen Bokémon */}
+          {catches.length > 0 && (
+            <div className="card">
+              <h3 style={{ marginBottom: 12 }}>📖 Gevangen Bokémon</h3>
+              {teamScores.map(t => {
+                const teamCatches = catches.filter(c => c.team_id === t.id)
+                return (
+                  <div key={t.id} style={{ marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: t.color, marginBottom: 6 }}>
+                      {t.emoji} {t.name} ({teamCatches.length})
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {teamCatches.length === 0 ? (
+                        <span style={{ fontSize: 12, color: 'var(--text2)' }}>Nog niets gevangen</span>
+                      ) : teamCatches.map(c => (
+                        <div key={c.id} style={{
+                          padding: '4px 10px', borderRadius: 8, fontSize: 12,
+                          background: 'var(--bg3)', border: '1px solid var(--border)',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                        }}>
+                          <span>{c.pokemon_definitions?.sprite_emoji}</span>
+                          <span style={{ fontWeight: 600 }}>{c.pokemon_definitions?.name}</span>
+                          {c.is_shiny && <span style={{ color: 'gold', fontSize: 10 }}>✨</span>}
+                          <span style={{ color: 'var(--text2)', fontSize: 11 }}>{c.cp}cp</span>
+                          {c.evolution_stage > 0 && (
+                            <span style={{ fontSize: 10, color: 'var(--success)' }}>Evo{c.evolution_stage}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
