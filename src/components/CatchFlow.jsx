@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { POKEMON_TYPES } from '../lib/constants'
 import ChallengeCard from './ChallengeCard'
@@ -13,6 +13,14 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
   const [arriving, setArriving]     = useState(false)
   const AUTO_ASSIGN_SECONDS = session?.admin_confirm_timeout_seconds || 45
   const [pendingSeconds, setPendingSeconds] = useState(0)
+  const [battleIntro, setBattleIntro] = useState(false) // Gameboy-stijl shake/flicker
+
+  // ── Refs: altijd actuele waarde in realtime-closure ──────────
+  const phaseRef        = useRef('arriving')
+  const opdrachtTypeRef = useRef(null)
+  const autoAssignedRef = useRef(false) // voorkomt dubbele auto-assign
+  phaseRef.current        = phase
+  opdrachtTypeRef.current = opdrachtType
 
   const pokemon = spawn?.pokemon_definitions
 
@@ -33,6 +41,14 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
     return () => clearTimeout(t)
   }, [phase, waitSeconds, spawn.id])
 
+  // ── Battle-intro shake wanneer opdracht start (Gameboy-stijl) ─
+  useEffect(() => {
+    if (phase !== 'opdracht') return
+    setBattleIntro(true)
+    const t = setTimeout(() => setBattleIntro(false), 900)
+    return () => clearTimeout(t)
+  }, [phase])
+
   // ── Pending timer + auto-assign als admin niet reageert ──────
   useEffect(() => {
     if (phase !== 'opdracht_pending') return
@@ -43,10 +59,13 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
   useEffect(() => {
     if (phase !== 'opdracht_pending') return
     if (pendingSeconds < AUTO_ASSIGN_SECONDS) return
+    if (autoAssignedRef.current) return // al één keer gevuurd
+
+    autoAssignedRef.current = true
 
     // Admin heeft niet gereageerd → auto-assign random compatible challenge
     async function autoAssign() {
-      const type = opdrachtType || 1
+      const type = opdrachtTypeRef.current || 1
       const { data } = await supabase
         .from('opdracht_definitions')
         .select('*')
@@ -80,7 +99,8 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
   async function loadOpdracht(spawnData) {
     const opId = spawnData.opdracht_id
     const resolved = spawnData.opdracht_resolved_data || {}
-    const type = spawnData.active_opdracht_type || opdrachtType || 1
+    // Gebruik ref voor opdrachtType zodat we altijd de actuele waarde hebben
+    const type = spawnData.active_opdracht_type || opdrachtTypeRef.current || 1
     if (!opId) return
 
     const { data } = await supabase
@@ -120,14 +140,20 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
           return
         }
 
-        // Team 2 is gearriveerd → T2T battle
-        if (phase === 'waiting' && updated.active_opdracht_type === 2) {
+        // Team 2 is gearriveerd → upgrade naar T2T
+        // Werkt ook als team 1 al in opdracht_pending zit (timer liep af vóór team 2 aankwam)
+        if (updated.active_opdracht_type === 2 &&
+            (phaseRef.current === 'waiting' || phaseRef.current === 'opdracht_pending') &&
+            opdrachtTypeRef.current !== 2) {
           setOpdrachtType(2)
-          setPhase('opdracht_pending')
+          if (phaseRef.current === 'waiting') setPhase('opdracht_pending')
+          autoAssignedRef.current = false // reset auto-assign zodat hij opnieuw kan vuren (nu als T2T)
         }
 
-        // Admin heeft een opdracht gekoppeld → laad en toon
-        if (updated.opdracht_id && (phase === 'opdracht_pending' || phase === 'waiting')) {
+        // Admin of auto-assign heeft opdracht gekoppeld → laad en toon
+        // Gebruik phaseRef.current ipv stale closure-variabele 'phase'
+        if (updated.opdracht_id &&
+            (phaseRef.current === 'opdracht_pending' || phaseRef.current === 'waiting')) {
           loadOpdracht(updated)
         }
       })
@@ -222,7 +248,7 @@ export default function CatchFlow({ spawn, player, team, session, onClose, onCau
   const typeInfo = POKEMON_TYPES[pokemon.pokemon_type] || {}
 
   return (
-    <div className="catch-screen">
+    <div className={`catch-screen${battleIntro ? ' battle-intro' : ''}`}>
       {/* Header */}
       <div className="topbar">
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 22 }}>✕</button>

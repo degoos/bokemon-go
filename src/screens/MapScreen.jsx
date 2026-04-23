@@ -10,6 +10,7 @@ import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM, CATCH_RADIUS_METERS } from
 import CatchFlow from '../components/CatchFlow'
 import StealFlow from '../components/StealFlow'
 import NotificationBanner from '../components/NotificationBanner'
+import PokeballThrow from '../components/PokeballThrow'
 import InventoryScreen from './InventoryScreen'
 import PokedexScreen from './PokedexScreen'
 
@@ -116,6 +117,7 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
   const { position, error: gpsError } = usePlayerLocation(player.id, session.id)
   const [activeTab, setActiveTab] = useState('map')
   const [activeCatch, setActiveCatch] = useState(null)
+  const [throwingAt, setThrowingAt] = useState(null) // spawn waar pokeball-animatie naartoe gaat
   const [stealChallenge, setStealChallenge] = useState(null)
   const [areas, setAreas] = useState([])
   const [nowMs, setNowMs] = useState(Date.now())
@@ -169,8 +171,15 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
     const radius = spawn.catch_radius_meters || CATCH_RADIUS_METERS
     const dist = getDistanceMeters(position.lat, position.lon, +spawn.latitude, +spawn.longitude)
     if (dist > radius) return
-    setActiveCatch(spawn)
+    // Toon eerst de pokeball-throw animatie, daarna pas de catch-flow
+    setThrowingAt(spawn)
+  }
+
+  function handleThrowDone() {
+    if (!throwingAt) return
+    setActiveCatch(throwingAt)
     setActiveTab('catch')
+    setThrowingAt(null)
   }
 
   async function startSteal() {
@@ -332,7 +341,12 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
       {activeTab === 'catch' && activeCatch && (
         <CatchFlow spawn={activeCatch} player={player} team={team} session={session}
           onClose={() => { setActiveCatch(null); setActiveTab('map') }}
-          onCaught={() => setTimeout(() => { setActiveCatch(null); setActiveTab('map') }, 2500)} />
+          onCaught={() => {
+            // Expliciete refetch als vangnet naast de realtime subscription —
+            // garandeert dat de catches-lijst direct up-to-date is in Pokédex + Inventory
+            refetch()
+            setTimeout(() => { setActiveCatch(null); setActiveTab('map') }, 2500)
+          }} />
       )}
       {activeTab === 'steal' && stealChallenge && (
         <StealFlow challenge={stealChallenge} player={player} team={team} catches={catches}
@@ -346,6 +360,17 @@ export default function MapScreen({ player, session, isAdmin, onSignOut }) {
       {activeTab === 'pokedex' && (
         <PokedexScreen sessionId={session.id} catches={catches.filter(c => c.team_id === team?.id)}
           onClose={() => setActiveTab('map')} />
+      )}
+
+      {/* Pokéball throw-animatie voor de catch start */}
+      {throwingAt && (
+        <PokeballThrow
+          emoji={throwingAt.spawn_type === 'mystery' ? '❓'
+               : throwingAt.spawn_type === 'legendary' ? '👑'
+               : (throwingAt.pokemon_definitions?.sprite_emoji || '❓')}
+          label={throwingAt.spawn_type === 'shiny' ? '✨ SHINY! ✨' : 'GO!'}
+          onComplete={handleThrowDone}
+        />
       )}
 
       {/* Bottom nav */}

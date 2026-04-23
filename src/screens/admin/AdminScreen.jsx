@@ -269,8 +269,8 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     })
     await supabase.from('notifications').insert({
       game_session_id: initialSession.id,
-      title: `${pokemon.sprite_emoji} ${pokemon.name} spawnt!`,
-      message: `Admin heeft een ${pokemon.name} gespawnd (${cp} CP)`,
+      title: `A wild ${pokemon.name} appeared! ${pokemon.sprite_emoji}`,
+      message: `Een wilde ${pokemon.name} is op de kaart verschenen (${cp} CP)`,
       type: 'info', emoji: pokemon.sprite_emoji,
     })
     setPendingSpawnLoc(null)
@@ -326,6 +326,39 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     return { ...t, pokemonCount: tc.length, totalCP: tc.reduce((sum, c) => sum + c.cp, 0) }
   })
 
+  // Opdracht-executie statistieken op basis van catches (catches hebben opdracht_id)
+  const opdrachtStats = (() => {
+    const out = {}
+    for (const c of catches || []) {
+      if (!c.opdracht_id) continue
+      if (!out[c.opdracht_id]) out[c.opdracht_id] = { count: 0, last: null }
+      out[c.opdracht_id].count += 1
+      const ts = c.created_at
+      if (ts && (!out[c.opdracht_id].last || ts > out[c.opdracht_id].last)) {
+        out[c.opdracht_id].last = ts
+      }
+    }
+    return out
+  })()
+
+  // Per-team Pokédex: { teamId: { [pokemonKey]: { name, emoji, count, topCP } } }
+  const teamPokedex = (() => {
+    const out = {}
+    for (const t of teams) out[t.id] = {}
+    for (const c of catches || []) {
+      const pd = c.pokemon_definitions
+      if (!pd || !c.team_id) continue
+      const bucket = out[c.team_id] || (out[c.team_id] = {})
+      const key = pd.id || pd.name
+      if (!bucket[key]) {
+        bucket[key] = { name: pd.name, emoji: pd.sprite_emoji, count: 0, topCP: 0 }
+      }
+      bucket[key].count += 1
+      if ((c.cp || 0) > bucket[key].topCP) bucket[key].topCP = c.cp || 0
+    }
+    return out
+  })()
+
   const currentPhase = session?.status || 'setup'
   const pendingEvents = events.filter(e => e.status === 'pending')
 
@@ -378,6 +411,63 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               </div>
             </div>
           ))}
+
+          {/* Per-team Pokédex */}
+          <div className="card">
+            <h3 style={{ marginBottom: 12 }}>📘 Pokédex per team</h3>
+            {teams.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--text2)' }}>Geen teams.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {teams.map(t => {
+                  const bucket = teamPokedex[t.id] || {}
+                  const entries = Object.values(bucket).sort((a, b) => b.count - a.count || b.topCP - a.topCP)
+                  const totalCount = entries.reduce((s, e) => s + e.count, 0)
+                  return (
+                    <div key={t.id} style={{
+                      borderLeft: `3px solid ${t.color}`, paddingLeft: 10,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}>{t.emoji} {t.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                          {entries.length} soorten · {totalCount} gevangen
+                        </div>
+                      </div>
+                      {entries.length === 0 ? (
+                        <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic' }}>
+                          Nog niets gevangen
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                          {entries.map(e => (
+                            <div key={e.name} style={{
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              padding: '5px 9px', borderRadius: 99,
+                              background: 'var(--bg3)', border: '1px solid var(--border)',
+                              fontSize: 12,
+                            }}>
+                              <span style={{ fontSize: 16, lineHeight: 1 }}>{e.emoji || '❓'}</span>
+                              <span style={{ fontWeight: 600 }}>{e.name}</span>
+                              {e.count > 1 && (
+                                <span style={{
+                                  fontSize: 10, fontWeight: 800, color: 'var(--warning)',
+                                  background: 'rgba(245,158,11,0.15)', padding: '0 6px',
+                                  borderRadius: 99,
+                                }}>×{e.count}</span>
+                              )}
+                              <span style={{ fontSize: 10, color: 'var(--text2)' }}>
+                                {e.topCP} CP
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
 
           {/* Opdrachten wachten op toewijzing */}
           {spawns.filter(s => s.status === 'catching' && s.requires_opdracht && !s.opdracht_id).map(s => {
@@ -800,8 +890,8 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             { key: 'blood_moon', name: 'Bloedmaan', emoji: '🌕', desc: 'Iedereen zichtbaar voor iedereen (3 min)' },
             { key: 'shuffle', name: 'Shuffle', emoji: '🔀', desc: 'Bokémon worden random herverdeeld' },
             { key: 'mirror_world', name: 'Mirror World', emoji: '🪞', desc: 'Teamkleuren omgewisseld op kaart (5 min)' },
-            { key: 'shiny_hunt', name: 'Shiny Hunt', emoji: '✨', desc: 'Zeldzame Shiny Bokémon spawnt' },
-            { key: 'legendary', name: 'Legendary Spawn', emoji: '👑', desc: 'Sterkste Bokémon spawnt → eindesignaal' },
+            { key: 'shiny_hunt', name: 'Shiny Hunt', emoji: '✨', desc: 'Zeldzame Shiny Bokémon appeared' },
+            { key: 'legendary', name: 'Legendary Spawn', emoji: '👑', desc: 'Sterkste Bokémon appeared → eindesignaal' },
           ].map(ev => (
             <div key={ev.key} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ fontSize: 32, flexShrink: 0 }}>{ev.emoji}</div>
@@ -939,7 +1029,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
           {/* Challenge bibliotheek */}
           <div className="card">
             <h3 style={{ marginBottom: 16 }}>🎯 Opdrachten</h3>
-            <ChallengeLibrary challenges={challenges} onUpdated={refreshChallenges} />
+            <ChallengeLibrary challenges={challenges} onUpdated={refreshChallenges} executionStats={opdrachtStats} />
           </div>
 
           <button className="btn btn-ghost" onClick={onSignOut}>🚪 Uitloggen</button>

@@ -147,8 +147,8 @@ export async function autoSpawnPokemon(sessionId) {
   if (spawn) {
     await supabase.from('notifications').insert({
       game_session_id: sessionId,
-      title: `${isShiny ? '✨ Shiny ' : ''}${pokemon.name} verschijnt!`,
-      message: `Een wilde ${isShiny ? 'glinsterende ' : ''}${pokemon.name} is gespawnd op de kaart!`,
+      title: `A wild ${isShiny ? '✨ shiny ' : ''}${pokemon.name} appeared!`,
+      message: `Een wilde ${isShiny ? 'glinsterende ' : ''}${pokemon.name} is op de kaart verschenen!`,
       type: isShiny ? 'success' : 'info',
       emoji: pokemon.sprite_emoji,
     })
