@@ -21,7 +21,24 @@ const EMPTY_NEW = {
   rekwisieten: '',
   auto_assignable: true,
   is_enabled: true,
+  master_ball_reward: false,
+  item_reward_key: '',
 }
+
+// Items die als reward via een challenge uitgekeerd kunnen worden
+export const ITEM_REWARDS = [
+  { key: '',            label: '— geen item-reward —' },
+  { key: 'master_ball', label: '🏆 Master Ball (één per spel)' },
+  { key: 'silph_scope', label: '🔭 Silph Scope' },
+  { key: 'protect',     label: '🛡️ Protect' },
+  { key: 'double_team', label: '🎭 Double Team' },
+  { key: 'snatch',      label: '🧲 Snatch' },
+  { key: 'mirror_coat', label: '🪞 Mirror Coat' },
+  { key: 'pickup',      label: '🎲 Pickup (3 random)' },
+  { key: 'poke_lure',   label: '🎣 Poké Lure' },
+  { key: 'moon_stone',  label: '🌙 Moon Stone' },
+  { key: 'pokemon_egg', label: '🥚 Pokémon Egg' },
+]
 
 function typeLabel(t) {
   return t === 1 ? '👤 Solo' : t === 2 ? '⚔️ T2T' : '🔄 Beide'
@@ -76,6 +93,8 @@ export default function ChallengeLibrary({ challenges, onUpdated, executionStats
       beschrijving_t2t:  c.beschrijving_t2t  || '',
       rekwisieten:      (c.rekwisieten || []).join(', '),
       auto_assignable:  c.auto_assignable !== false,
+      master_ball_reward: !!c.master_ball_reward,
+      item_reward_key:    c.item_reward_key || '',
     })
   }
 
@@ -123,6 +142,8 @@ export default function ChallengeLibrary({ challenges, onUpdated, executionStats
         : [],
       auto_assignable: !!newData.auto_assignable,
       is_enabled: !!newData.is_enabled,
+      master_ball_reward: !!newData.master_ball_reward,
+      item_reward_key: newData.item_reward_key || null,
       vereist_content: false,
       variabelen: [],
     }
@@ -273,6 +294,26 @@ export default function ChallengeLibrary({ challenges, onUpdated, executionStats
             </label>
           </div>
 
+          {/* Reward (item / master ball) */}
+          <div style={{
+            background: 'rgba(124,58,237,0.1)', border: '1px solid #7c3aed44',
+            borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
+            <div style={{ ...labelStyle, color: '#c4b5fd' }}>🎁 Reward bij voltooiing (optioneel)</div>
+            <select value={newData.item_reward_key || ''}
+              onChange={e => setNewData(d => ({ ...d, item_reward_key: e.target.value, master_ball_reward: e.target.value === 'master_ball' }))}
+              style={{ ...inputStyle, width: '100%' }}>
+              {ITEM_REWARDS.map(r => (
+                <option key={r.key} value={r.key}>{r.label}</option>
+              ))}
+            </select>
+            {newData.item_reward_key === 'master_ball' && (
+              <div style={{ fontSize: 11, color: '#fbbf24', fontStyle: 'italic' }}>
+                ⚠️ Master Ball mag maar 1× per spel uitgekeerd worden — controle in CatchFlow.
+              </div>
+            )}
+          </div>
+
           {createError && (
             <div style={{
               padding: '8px 10px', borderRadius: 8, fontSize: 12,
@@ -383,6 +424,15 @@ export default function ChallengeLibrary({ challenges, onUpdated, executionStats
                         border: '1px solid rgba(239,68,68,0.25)',
                       }}>⚠️ Content vereist</span>
                     )}
+                    {c.item_reward_key && (
+                      <span style={{
+                        fontSize: 10, padding: '1px 8px', borderRadius: 99,
+                        background: 'rgba(124,58,237,0.15)', color: '#c4b5fd',
+                        border: '1px solid #7c3aed',
+                      }}>
+                        🎁 {ITEM_REWARDS.find(r => r.key === c.item_reward_key)?.label || c.item_reward_key}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -484,6 +534,20 @@ export default function ChallengeLibrary({ challenges, onUpdated, executionStats
                           onChange={e => setEditData(d => ({...d, auto_assignable: e.target.checked}))} />
                         Auto-toewijsbaar
                       </label>
+                      {/* Reward (item / master ball) */}
+                      <div style={{
+                        background: 'rgba(124,58,237,0.1)', border: '1px solid #7c3aed44',
+                        borderRadius: 8, padding: 10, display: 'flex', flexDirection: 'column', gap: 6,
+                      }}>
+                        <div style={{ ...labelStyle, color: '#c4b5fd' }}>🎁 Reward bij voltooiing</div>
+                        <select value={editData.item_reward_key || ''}
+                          onChange={e => setEditData(d => ({ ...d, item_reward_key: e.target.value, master_ball_reward: e.target.value === 'master_ball' }))}
+                          style={{ ...inputStyle, width: '100%' }}>
+                          {ITEM_REWARDS.map(r => (
+                            <option key={r.key} value={r.key}>{r.label}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button onClick={() => saveEdit(c.id)} disabled={saving}
                           style={{...btnStyle, background: 'var(--success)', color: '#fff', flex: 1}}>

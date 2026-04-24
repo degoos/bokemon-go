@@ -16,6 +16,7 @@ import InventoryScreen from './InventoryScreen'
 import PokedexScreen from './PokedexScreen'
 import EvolutionScreen from './EvolutionScreen'
 import TournamentScreen from './TournamentScreen'
+import FinaleScreen from './FinaleScreen'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -146,6 +147,33 @@ function makeBiomeLabel(emoji, label, color) {
   })
 }
 
+// Team Rocket HQ marker — verborgen "Pokéshop" met beveiligingssystemen
+function makeHqIcon(progressLabel = '') {
+  return L.divIcon({
+    html: `<div style="position:relative;width:60px;height:72px;display:flex;flex-direction:column;align-items:center;">
+      <div style="font-size:42px;line-height:1;filter:drop-shadow(0 0 10px #ef4444) drop-shadow(0 2px 4px rgba(0,0,0,0.9));animation:bokePulse 2s ease-in-out infinite;">🏚️</div>
+      <div style="position:absolute;top:-2px;right:6px;font-size:14px;line-height:1;">🅡</div>
+      <div style="background:rgba(127,29,29,0.95);border:1px solid #ef4444;border-radius:8px;padding:2px 8px;margin-top:2px;font-size:10px;font-weight:800;color:#fca5a5;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,0.9);letter-spacing:0.5px;">
+        TEAM ROCKET HQ${progressLabel ? ` · ${progressLabel}` : ''}
+      </div>
+    </div>`,
+    iconSize: [60, 72], iconAnchor: [30, 60], popupAnchor: [0, -60], className: '',
+  })
+}
+
+// Mobiele Shop — volgt admin GPS, alleen zichtbaar als admin geactiveerd
+function makeMobileShopIcon() {
+  return L.divIcon({
+    html: `<div style="position:relative;width:56px;height:68px;display:flex;flex-direction:column;align-items:center;">
+      <div style="font-size:38px;line-height:1;filter:drop-shadow(0 0 8px #facc15) drop-shadow(0 2px 4px rgba(0,0,0,0.9));animation:bokePulse 1.4s ease-in-out infinite;">🚐</div>
+      <div style="background:rgba(120,53,15,0.95);border:1px solid #facc15;border-radius:8px;padding:2px 8px;margin-top:2px;font-size:10px;font-weight:800;color:#fde68a;white-space:nowrap;text-shadow:0 1px 2px rgba(0,0,0,0.9);letter-spacing:0.5px;">
+        SHOP
+      </div>
+    </div>`,
+    iconSize: [56, 68], iconAnchor: [28, 56], popupAnchor: [0, -56], className: '',
+  })
+}
+
 // Countdown-icon met klok-overlay die met de klok mee vult (SVG stroke trick)
 function makeCountdownIcon(emoji, totalSeconds, elapsedSeconds) {
   const r = 10
@@ -192,6 +220,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   const [nowMs, setNowMs] = useState(Date.now())
   const [activeIntro, setActiveIntro] = useState(null) // welke fase-intro tonen
   const shownIntrosRef = useRef(new Set())             // bijhouden welke al getoond zijn
+  const [poiPanel, setPoiPanel] = useState(null)       // {kind:'hq'|'shop', ...} — detail buiten MapContainer
   const mapRef = useRef(null)
 
   // Derive own team from loaded data
@@ -224,13 +253,28 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
     return () => clearInterval(iv)
   }, [tickingKey])
 
-  // Moonstone actief voor mijn team?
-  const moonstoneActive = team && effects.some(e =>
-    e.team_id === team.id && e.item_key === 'moonstone' && e.is_active &&
+  // Silph Scope actief voor mijn team? (opvolger van Moonstone-visibility)
+  const silphScopeActive = team && effects.some(e =>
+    e.team_id === team.id && e.item_key === 'silph_scope' && e.is_active &&
     (!e.expires_at || new Date(e.expires_at) > new Date())
   )
   const bloodMoonActive = events.some(e => e.event_key === 'blood_moon' && e.status === 'active')
-  const opponentsVisible = moonstoneActive || bloodMoonActive
+  const opponentsVisible = silphScopeActive || bloodMoonActive
+
+  // Double Team decoys: van TEGENSTANDER op MIJN kaart (target_team_id = mijn team)
+  const decoysAgainstMe = team ? effects.filter(e =>
+    e.item_key === 'double_team' && e.is_active && e.target_team_id === team.id &&
+    (!e.expires_at || new Date(e.expires_at) > new Date())
+  ) : []
+
+  // ── Team Rocket HQ + Mobiele Shop posities ──
+  const hqLoc = session?.hq_location && session.hq_location.lat && session.hq_location.lng
+    ? [+session.hq_location.lat, +session.hq_location.lng] : null
+  const adminPlayer = (players || []).find(p => p.is_admin && p.latitude && p.longitude)
+  const mobileShopActive = !!session?.mobile_shop_active
+  const shopLoc = (mobileShopActive && adminPlayer)
+    ? [+adminPlayer.latitude, +adminPlayer.longitude] : null
+  const mobileShopItems = Array.isArray(session?.mobile_shop_items) ? session.mobile_shop_items : []
 
   // Auto-navigeer naar de juiste tab bij fase-wissel
   useEffect(() => {
@@ -308,7 +352,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   // Spawns enkel tonen in verzamelfase (tijdens training/toernooi zijn er geen actieve vangsten)
   const visibleSpawns = isCollecting ? spawns : []
 
-  const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi'].includes(activeTab)
+  const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi','finale'].includes(activeTab)
 
   // ── Setup-fase: toon wachtscherm i.p.v. lege kaart ────────────
   if (isSetup) {
@@ -409,15 +453,37 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
             </Marker>
           ))}
 
-          {/* Tegenstanders (Moonstone/Bloedmaan) */}
+          {/* Tegenstanders (Silph Scope/Bloedmaan) — let op: decoys vervangen ECHTE positie van die speler */}
           {opponentsVisible && enemyPlayers.filter(p => p.latitude && p.longitude).map(p => {
             const eTeam = teams.find(t => t.id === p.team_id)
+            // Heeft de tegenstander een Double Team decoy actief op MIJ gericht?
+            const decoy = decoysAgainstMe.find(d => d.target_player_id === p.id)
+            const lat = decoy?.decoy_latitude ? +decoy.decoy_latitude : +p.latitude
+            const lng = decoy?.decoy_longitude ? +decoy.decoy_longitude : +p.longitude
             return (
-              <Marker key={p.id} position={[+p.latitude, +p.longitude]} icon={makePlayerIcon(eTeam?.emoji||'❗', p.name, false, 30)}>
+              <Marker key={p.id} position={[lat, lng]} icon={makePlayerIcon(eTeam?.emoji||'❗', p.name, false, 30)}>
                 <Popup><div className="spawn-popup"><h4>⚠️ {p.name}</h4><div style={{color:'var(--danger)',fontSize:12,fontWeight:700}}>Tegenstander!</div></div></Popup>
               </Marker>
             )
           })}
+
+          {/* Team Rocket HQ — vaste locatie, altijd zichtbaar in verzamelfase */}
+          {isCollecting && hqLoc && (
+            <Marker
+              position={hqLoc}
+              icon={makeHqIcon('komt eraan')}
+              eventHandlers={{ click: () => setPoiPanel({ kind: 'hq' }) }}
+            />
+          )}
+
+          {/* Mobiele Shop — volgt admin GPS, alleen als geactiveerd */}
+          {isCollecting && shopLoc && (
+            <Marker
+              position={shopLoc}
+              icon={makeMobileShopIcon()}
+              eventHandlers={{ click: () => setPoiPanel({ kind: 'shop' }) }}
+            />
+          )}
 
           {/* Bokémon spawns — enkel zichtbaar in verzamelfase */}
           {visibleSpawns.map(spawn => {
@@ -502,9 +568,9 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
           </div>
         )}
 
-        {moonstoneActive && (
+        {silphScopeActive && (
           <div style={{position:'absolute',top:8,left:'50%',transform:'translateX(-50%)',background:'#2d1558',border:'1px solid var(--accent)',borderRadius:10,padding:'6px 14px',fontSize:13,fontWeight:700,zIndex:500,color:'#c084fc',whiteSpace:'nowrap'}}>
-            🌙 Moonstone actief
+            🔭 Silph Scope actief
           </div>
         )}
       </div>
@@ -524,7 +590,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
       )}
       {activeTab === 'inventory' && (
         <InventoryScreen catches={catches} inventory={inventory} effects={effects}
-          teams={teams} player={player} team={team} sessionId={session.id}
+          teams={teams} players={players} player={player} team={team} sessionId={session.id}
           currentPhase={currentPhase}
           onClose={() => setActiveTab('map')} />
       )}
@@ -553,6 +619,19 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
           team={team}
           isAdmin={false}
           onClose={() => setActiveTab('map')}
+          onStartFinale={() => setActiveTab('finale')}
+        />
+      )}
+      {activeTab === 'finale' && (
+        <FinaleScreen
+          session={session}
+          sessionId={session.id}
+          teams={teams}
+          catches={catches}
+          player={player}
+          team={team}
+          isAdmin={false}
+          onClose={() => setActiveTab('toernooi')}
         />
       )}
 
@@ -564,6 +643,95 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
                : (throwingAt.pokemon_definitions?.sprite_emoji || '❓')}
           label={throwingAt.spawn_type === 'shiny' ? '✨ BLINKEND! ✨' : 'GO!'}
         />
+      )}
+
+      {/* POI detail-panel (HQ / Mobiele Shop) — buiten MapContainer i.v.m. mobile touch bug */}
+      {poiPanel && !showOverlay && (
+        <div style={{
+          position: 'absolute', left: 12, right: 12, bottom: 88, zIndex: 700,
+          background: '#1e1e3a', border: '1px solid var(--border)', borderRadius: 14,
+          padding: 16, boxShadow: '0 6px 24px rgba(0,0,0,0.6)', maxHeight: '60vh', overflowY: 'auto',
+        }}>
+          {poiPanel.kind === 'hq' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                <div style={{ fontSize: 32 }}>🏚️</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: '#fca5a5' }}>Team Rocket HQ</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)' }}>Geheime basis vol beveiligingssystemen</div>
+                </div>
+                <button onClick={() => setPoiPanel(null)} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 22, cursor: 'pointer' }}>✕</button>
+              </div>
+              {hqLoc && position && (() => {
+                const dist = getDistanceMeters(position.lat, position.lon, hqLoc[0], hqLoc[1])
+                const inRange = dist <= (CATCH_RADIUS_METERS * 1.2)
+                return (
+                  <>
+                    <div style={{ fontSize: 13, color: inRange ? 'var(--success)' : 'var(--text2)', marginBottom: 10 }}>
+                      {inRange ? '✅ Je staat bij het HQ' : `📍 ${Math.round(dist)}m verwijderd`}
+                    </div>
+                    <div style={{
+                      background: '#1a0f0f', border: '1px solid #7f1d1d', borderRadius: 10,
+                      padding: 12, fontSize: 13, color: '#fca5a5', lineHeight: 1.5, marginBottom: 10,
+                    }}>
+                      🚪 <strong>3 kamers wachten</strong>: Vuilbak-zoektocht (Ingang) → Spinner Tiles (Beveiligingszaal) → Strength Boulders (Kluis).
+                      <br /><br />
+                      <em>De mini-games komen in een volgende update. Voor nu: kom hier fysiek samen — Team Rocket controleert je legitimiteit.</em>
+                    </div>
+                  </>
+                )
+              })()}
+            </>
+          )}
+          {poiPanel.kind === 'shop' && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                <div style={{ fontSize: 32 }}>🚐</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: '#fde68a' }}>Mobiele Shop</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)' }}>Team Rocket — kom langs met je drank</div>
+                </div>
+                <button onClick={() => setPoiPanel(null)} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 22, cursor: 'pointer' }}>✕</button>
+              </div>
+              {shopLoc && position && (() => {
+                const dist = getDistanceMeters(position.lat, position.lon, shopLoc[0], shopLoc[1])
+                const inRange = dist <= (CATCH_RADIUS_METERS * 1.2)
+                return (
+                  <div style={{ fontSize: 13, color: inRange ? 'var(--success)' : 'var(--text2)', marginBottom: 10 }}>
+                    {inRange ? '✅ Je staat bij de shop' : `📍 ${Math.round(dist)}m verwijderd — kom dichterbij`}
+                  </div>
+                )
+              })()}
+              {mobileShopItems.length === 0 ? (
+                <div style={{
+                  background: '#1a1a2e', border: '1px solid var(--border)', borderRadius: 10,
+                  padding: 14, fontSize: 13, color: 'var(--text2)', textAlign: 'center',
+                }}>
+                  Team Rocket heeft nog niets uitgestald. Kom later terug.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {mobileShopItems.map((it, idx) => (
+                    <div key={idx} className="card" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ fontSize: 26 }}>{it.emoji || '🎁'}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{it.name || it.item_key}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                          Prijs: {it.prijs_slokken ? `${it.prijs_slokken} slokken` : ''}
+                          {it.prijs_uitdaging ? ` · ${it.prijs_uitdaging}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--accent)' }}>👋 vraag aan Team Rocket</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 10, lineHeight: 1.5, fontStyle: 'italic' }}>
+                Items worden manueel toegekend door Team Rocket nadat je de prijs hebt betaald.
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* ── Fase-banner (altijd zichtbaar op de kaart, niet tijdens overlays) ── */}

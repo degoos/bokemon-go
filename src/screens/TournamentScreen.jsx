@@ -94,7 +94,7 @@ function LevelBadge({ index }) {
 // ────────────────────────────────────────────────────────────
 export default function TournamentScreen({
   session, sessionId, teams, players, catches,
-  player, team, isAdmin, onClose,
+  player, team, isAdmin, onClose, onStartFinale,
 }) {
   const [state, setState] = useState(null)           // tournament_state rij
   const [matchups, setMatchups] = useState([])       // tournament_matchups
@@ -790,12 +790,38 @@ export default function TournamentScreen({
         </div>
 
         {isAdmin && (
-          <div style={{ padding: 16, borderTop: '1px solid #1e293b' }}>
+          <div style={{ padding: 16, borderTop: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button
+              onClick={() => onStartFinale && onStartFinale()}
+              style={{
+                background: 'linear-gradient(135deg, #7c3aed, #dc2626)',
+                color: '#fff', border: 'none', borderRadius: 12,
+                padding: '16px 20px', fontSize: 16, fontWeight: 900, cursor: 'pointer',
+                boxShadow: '0 0 24px rgba(124,58,237,0.4)',
+              }}
+            >
+              ⚔️ Legendaire Finale starten!
+            </button>
             <button
               onClick={() => advancePhase('intro', { current_gym: 0 })}
               style={ghostBtn}
             >
               🔄 Toernooi herspelen
+            </button>
+          </div>
+        )}
+        {!isAdmin && (
+          <div style={{ padding: 16, borderTop: '1px solid #1e293b' }}>
+            <button
+              onClick={() => onStartFinale && onStartFinale()}
+              style={{
+                background: 'linear-gradient(135deg, #7c3aed, #dc2626)',
+                color: '#fff', border: 'none', borderRadius: 12,
+                padding: '16px 20px', fontSize: 16, fontWeight: 900, cursor: 'pointer',
+                width: '100%',
+              }}
+            >
+              ⚔️ Legendaire Finale!
             </button>
           </div>
         )}

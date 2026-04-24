@@ -13,6 +13,7 @@ import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
 import PokedexScreen from '../PokedexScreen'
 import TournamentScreen from '../TournamentScreen'
+import FinaleScreen from '../FinaleScreen'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -102,6 +103,10 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [pendingFadeSeconds, setPendingFadeSeconds] = useState(60)
   const [nowMs, setNowMs] = useState(Date.now())
   const [shopActive, setShopActive] = useState(false)
+  // Mobiele Shop catalog (configureerbare items + prijs) — gesynced met session.mobile_shop_items
+  const [shopItems, setShopItems] = useState([])
+  // HQ-locatie state (lat/lng), gesynced met session.hq_location
+  const [hqLatLng, setHqLatLng] = useState({ lat: '', lng: '' })
   const [challenges, setChallenges] = useState([])
   const [challengeSelectorSpawn, setChallengeSelectorSpawn] = useState(null)
   // pokedexView: 'both' | <teamId>
@@ -356,6 +361,9 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       setPendingSpawnLoc(latlng)
     } else if (mapMode === 'boundary' || mapMode === 'biome') {
       setDrawingPoints(prev => [...prev, [latlng.lat, latlng.lng]])
+    } else if (mapMode === 'hq_location') {
+      saveHqLocation(latlng.lat, latlng.lng)
+      setMapMode('view')
     }
   }
 
@@ -457,7 +465,11 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   async function toggleShop() {
     const newActive = !shopActive
     setShopActive(newActive)
-    if (newActive && position) {
+    // Schrijf naar DB zodat speler-app dit ook ziet
+    await supabase.from('game_sessions')
+      .update({ mobile_shop_active: newActive })
+      .eq('id', initialSession.id)
+    if (newActive) {
       await supabase.from('notifications').insert({
         game_session_id: initialSession.id,
         title: '🏪 Mobiele Shop is open!',
@@ -465,6 +477,37 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
         type: 'success', emoji: '🏪',
       })
     }
+  }
+
+  // Sync state met session-velden zodra die binnenkomen
+  useEffect(() => {
+    if (!session) return
+    if (typeof session.mobile_shop_active === 'boolean' && session.mobile_shop_active !== shopActive) {
+      setShopActive(session.mobile_shop_active)
+    }
+    if (Array.isArray(session.mobile_shop_items)) {
+      setShopItems(session.mobile_shop_items)
+    }
+    if (session.hq_location && session.hq_location.lat && session.hq_location.lng) {
+      setHqLatLng({ lat: String(session.hq_location.lat), lng: String(session.hq_location.lng) })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.mobile_shop_active, session?.hq_location, session?.mobile_shop_items])
+
+  async function saveShopItems(items) {
+    setShopItems(items)
+    await supabase.from('game_sessions')
+      .update({ mobile_shop_items: items })
+      .eq('id', initialSession.id)
+  }
+
+  async function saveHqLocation(lat, lng) {
+    if (!lat || !lng) return
+    const loc = { lat: +lat, lng: +lng }
+    setHqLatLng({ lat: String(lat), lng: String(lng) })
+    await supabase.from('game_sessions')
+      .update({ hq_location: loc })
+      .eq('id', initialSession.id)
   }
 
   // ── Direct toewijzen: Bokémon zonder opdracht aan team geven ──
@@ -576,7 +619,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
         const pendingEvoCount = evoRequests.filter(r => r.status === 'pending').length
         return (
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
-            {[['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['tournament','🏆'], ['setup','⚙️']].map(([key, icon]) => (
+            {[['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['tournament','🏆'], ['finale','⚔️'], ['setup','⚙️']].map(([key, icon]) => (
               <button key={key} onClick={() => setTab(key)} style={{
                 flex: 1, padding: '10px 0', background: 'none', border: 'none', cursor: 'pointer',
                 borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
@@ -1153,7 +1196,32 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             {pendingSpawnLoc && (
               <Marker position={[pendingSpawnLoc.lat, pendingSpawnLoc.lng]} icon={makeEmojiIcon('⭐', 32)} />
             )}
+
+            {/* HQ-locatie marker (admin-zichtbaar) */}
+            {session?.hq_location?.lat && session?.hq_location?.lng && (
+              <Marker
+                position={[+session.hq_location.lat, +session.hq_location.lng]}
+                icon={makeEmojiIcon('🏚️', 36)}
+              >
+                <Popup><div className="spawn-popup"><h4>🏚️ Team Rocket HQ</h4></div></Popup>
+              </Marker>
+            )}
           </MapContainer>
+
+          {/* HQ-locatie tap-mode banner */}
+          {mapMode === 'hq_location' && (
+            <div style={{
+              position: 'absolute', top: 12, left: 12, right: 12, zIndex: 600,
+              background: '#7f1d1d', border: '1px solid #ef4444', borderRadius: 12,
+              padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <span style={{ fontSize: 20 }}>🏚️</span>
+              <div style={{ flex: 1, fontSize: 13, color: '#fca5a5', fontWeight: 700 }}>
+                Tik op de kaart om de HQ-locatie te zetten
+              </div>
+              <button onClick={() => setMapMode('view')} style={{ background: 'none', border: 'none', color: '#fca5a5', fontSize: 18, cursor: 'pointer' }}>✕</button>
+            </div>
+          )}
 
           {/* Map mode toolbar */}
           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'var(--bg2)', borderTop: '1px solid var(--border)', padding: '10px 12px', zIndex: 500, display: 'flex', gap: 8, overflowX: 'auto' }}>
@@ -1551,6 +1619,23 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             team={null}
             isAdmin={true}
             onClose={() => setTab('dashboard')}
+            onStartFinale={() => setTab('finale')}
+          />
+        </div>
+      )}
+
+      {/* Legendaire Finale tab — admin-view van FinaleScreen */}
+      {tab === 'finale' && (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <FinaleScreen
+            session={session || initialSession}
+            sessionId={initialSession.id}
+            teams={teams}
+            catches={catches}
+            player={null}
+            team={null}
+            isAdmin={true}
+            onClose={() => setTab('tournament')}
           />
         </div>
       )}
@@ -1573,13 +1658,117 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               />
             </div>
             <div className="field">
-              <label>Moonstone duur (minuten)</label>
+              <label>Silph Scope duur (minuten)</label>
               <input
                 type="number"
                 defaultValue={session?.moonstone_duration_minutes || 6}
                 onBlur={e => supabase.from('game_sessions').update({ moonstone_duration_minutes: Number(e.target.value) }).eq('id', initialSession.id)}
               />
             </div>
+          </div>
+
+          {/* ── Team Rocket HQ-locatie ───────────────────────── */}
+          <div className="card" style={{ borderLeft: '3px solid #ef4444' }}>
+            <h3 style={{ marginBottom: 6 }}>🏚️ Team Rocket HQ</h3>
+            <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
+              Eén vaste GPS-locatie waar trainers het HQ kunnen binnendringen (3 mini-game kamers — komen later).
+            </p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <input
+                type="number" step="0.0000001"
+                placeholder="latitude"
+                value={hqLatLng.lat}
+                onChange={e => setHqLatLng(l => ({ ...l, lat: e.target.value }))}
+                style={{ flex: 1, padding: 8, background: '#0d1226', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 13 }}
+              />
+              <input
+                type="number" step="0.0000001"
+                placeholder="longitude"
+                value={hqLatLng.lng}
+                onChange={e => setHqLatLng(l => ({ ...l, lng: e.target.value }))}
+                style={{ flex: 1, padding: 8, background: '#0d1226', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-success btn-sm" style={{ width: 'auto', padding: '8px 14px', fontSize: 12 }}
+                onClick={() => saveHqLocation(hqLatLng.lat, hqLatLng.lng)}
+                disabled={!hqLatLng.lat || !hqLatLng.lng}>
+                💾 Opslaan
+              </button>
+              {position && (
+                <button className="btn btn-ghost btn-sm" style={{ width: 'auto', padding: '8px 14px', fontSize: 12 }}
+                  onClick={() => saveHqLocation(position.lat, position.lon)}>
+                  📍 Hier (mijn GPS)
+                </button>
+              )}
+              <button className="btn btn-ghost btn-sm" style={{ width: 'auto', padding: '8px 14px', fontSize: 12 }}
+                onClick={() => { setMapMode('hq_location'); setTab('map') }}>
+                🗺️ Tik op kaart
+              </button>
+              {(() => {
+                const boundary = areas.find(a => a.type === 'boundary')
+                if (!boundary) return null
+                return (
+                  <button className="btn btn-ghost btn-sm" style={{ width: 'auto', padding: '8px 14px', fontSize: 12 }}
+                    onClick={() => {
+                      const c = getPolygonCenter(boundary.geojson)
+                      if (c) saveHqLocation(c[0], c[1])
+                    }}>
+                    🎯 Centrum speelveld
+                  </button>
+                )
+              })()}
+            </div>
+            {session?.hq_location?.lat && (
+              <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 8 }}>
+                ✅ HQ ingesteld op {(+session.hq_location.lat).toFixed(5)}, {(+session.hq_location.lng).toFixed(5)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Mobiele Shop catalog ─────────────────────────── */}
+          <div className="card" style={{ borderLeft: '3px solid #facc15' }}>
+            <h3 style={{ marginBottom: 6 }}>🚐 Mobiele Shop catalog</h3>
+            <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
+              Kies welke items beschikbaar zijn en wat de prijs is (slokken / uitdaging). Trainers zien dit als ze op de shop tikken op de kaart.
+            </p>
+            {shopItems.length === 0 && (
+              <p style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 8 }}>
+                Geen items in catalog — voeg er eentje toe.
+              </p>
+            )}
+            {shopItems.map((it, idx) => (
+              <div key={idx} style={{
+                display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6,
+                background: '#0d1226', border: '1px solid var(--border)', borderRadius: 8, padding: 6,
+              }}>
+                <input
+                  type="text" placeholder="emoji" value={it.emoji || ''}
+                  style={{ width: 38, padding: 6, background: '#1a1a2e', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 14, textAlign: 'center' }}
+                  onChange={e => {
+                    const next = [...shopItems]; next[idx] = { ...it, emoji: e.target.value }; saveShopItems(next)
+                  }}
+                />
+                <input
+                  type="text" placeholder="naam (item)" value={it.name || ''}
+                  style={{ flex: 1, padding: 6, background: '#1a1a2e', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }}
+                  onChange={e => { const next = [...shopItems]; next[idx] = { ...it, name: e.target.value }; saveShopItems(next) }}
+                />
+                <input
+                  type="number" placeholder="slok" value={it.prijs_slokken || ''}
+                  style={{ width: 50, padding: 6, background: '#1a1a2e', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }}
+                  onChange={e => { const next = [...shopItems]; next[idx] = { ...it, prijs_slokken: e.target.value ? +e.target.value : null }; saveShopItems(next) }}
+                />
+                <button onClick={() => { const next = shopItems.filter((_, i) => i !== idx); saveShopItems(next) }}
+                  style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 16, padding: '2px 6px' }}>
+                  🗑️
+                </button>
+              </div>
+            ))}
+            <button className="btn btn-ghost btn-sm" style={{ width: '100%', padding: '8px', fontSize: 12, marginTop: 4 }}
+              onClick={() => saveShopItems([...shopItems, { emoji: '🎁', name: '', prijs_slokken: 3 }])}>
+              + Item toevoegen
+            </button>
           </div>
 
           {/* Straf uitdelen */}

@@ -34,6 +34,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
   const [battleIntro, setBattleIntro] = useState(false)
   // winPhase: 'throw' → 'shake' → 'done'
   const [winPhase, setWinPhase] = useState('throw')
+  const [masterBallAuto, setMasterBallAuto] = useState(false) // detecteren bij mount
 
   // Team 1 is er al wanneer wij (team 2) de CatchFlow openen → urgency countdown
   const team1AlreadyThere = !!spawn?.catch_team1_arrived_at && !spawn?.active_opdracht_type
@@ -58,6 +59,28 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
     const t = setTimeout(() => setUrgentSeconds(s => Math.max(0, s - 1)), 1000)
     return () => clearTimeout(t)
   }, [phase, urgentSeconds])
+
+  // ── Master Ball: check ALS we de catchflow openen of er een active master_ball is ──
+  useEffect(() => {
+    if (!team?.id || !spawn?.game_session_id) return
+    let cancelled = false
+    async function checkMaster() {
+      const { data } = await supabase.from('active_effects')
+        .select('*').eq('game_session_id', spawn.game_session_id)
+        .eq('team_id', team.id).eq('item_key', 'master_ball').eq('is_active', true)
+        .limit(1)
+      if (cancelled || !data || data.length === 0) return
+      // Active Master Ball gevonden — direct vangen, opdracht skippen
+      setMasterBallAuto(true)
+      // Effect deactiveren (verbruikt)
+      await supabase.from('active_effects').update({ is_active: false }).eq('id', data[0].id)
+      // Catch direct uitvoeren
+      await handleCompleteOpdracht()
+    }
+    checkMaster()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team?.id, spawn?.id])
 
   // ── Win-animatie fases (timer zit hier, niet in PokeballThrow) ──
   // Fase 1 'throw': pokébal vliegt naar Pokémon (1.3s)
@@ -242,6 +265,45 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
       message: `XP: ${spawn.cp}${spawn.spawn_type === 'shiny' ? ' ✨ BLINKEND!' : ''}`,
       type: 'success', emoji: pokemon?.sprite_emoji,
     })
+
+    // Item-reward toekennen als de challenge er één heeft
+    const rewardKey = opdracht?.item_reward_key
+    if (rewardKey) {
+      // Master Ball mag maar 1× per spel — check of er al ergens een uitgekeerd is
+      let allowed = true
+      if (rewardKey === 'master_ball') {
+        const { data: existing } = await supabase.from('team_inventory')
+          .select('id').eq('game_session_id', spawn.game_session_id).eq('item_key', 'master_ball').limit(1)
+        const { data: usedEffects } = await supabase.from('active_effects')
+          .select('id').eq('game_session_id', spawn.game_session_id).eq('item_key', 'master_ball').limit(1)
+        if ((existing?.length || 0) > 0 || (usedEffects?.length || 0) > 0) allowed = false
+      }
+      if (allowed) {
+        // Upsert in team_inventory
+        const { data: invRow } = await supabase.from('team_inventory')
+          .select('*').eq('game_session_id', spawn.game_session_id)
+          .eq('team_id', team.id).eq('item_key', rewardKey).maybeSingle()
+        if (invRow) {
+          await supabase.from('team_inventory').update({
+            quantity: (invRow.quantity || 0) + 1,
+            updated_at: new Date().toISOString(),
+          }).eq('id', invRow.id)
+        } else {
+          await supabase.from('team_inventory').insert({
+            game_session_id: spawn.game_session_id,
+            team_id: team.id, item_key: rewardKey, quantity: 1,
+          })
+        }
+        await supabase.from('notifications').insert({
+          game_session_id: spawn.game_session_id,
+          title: `🎁 Reward: ${rewardKey === 'master_ball' ? 'Master Ball' : rewardKey}!`,
+          message: `${team.name} heeft een item verdiend door de opdracht.`,
+          type: 'success', emoji: '🎁',
+          target_team_id: team.id,
+        })
+      }
+    }
+
     setResult('won')
     setPhase('result')
     if (onCaught) onCaught()

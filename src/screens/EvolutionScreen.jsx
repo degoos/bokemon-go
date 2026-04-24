@@ -38,9 +38,9 @@ export default function EvolutionScreen({ sessionId, team, catches: catchesProp,
 
   const isTrainingPhase = currentPhase === 'training'
 
-  // ── Moon Stones in teaminventaris ──────────────────────────────
+  // ── Moon Stones in teaminventaris (key: 'moon_stone' sinds items-migratie) ──
   const moonStoneItem = (inventory || []).find(
-    i => i.team_id === team?.id && i.item_key === 'moonstone' && (i.quantity || 0) > 0
+    i => i.team_id === team?.id && i.item_key === 'moon_stone' && (i.quantity || 0) > 0
   )
   const moonStoneCount = moonStoneItem?.quantity || 0
 

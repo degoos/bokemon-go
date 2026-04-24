@@ -6,7 +6,7 @@ const INTROS = {
     emoji:    '🔥',
     title:    ['De Oudsberg', 'brandt!'],
     who:      'Professor Rocket',
-    quote:    '"Team Rocket heeft de Pokéshop geplunderd. Wilde Bokémon zijn ontsnapt naar de duinen. Vang ze — vóór wij dat doen."',
+    quote:    '"Wat eruitziet als een verlaten Pokéshop is in werkelijkheid het geheime hoofdkwartier van Team Rocket — vol beveiligingssystemen en verstopte items. Wilde Bokémon zijn ontsnapt naar de duinen. Vang ze, breek het HQ binnen — vóór wij dat doen."',
     sub:      'Twee teams. Één gebied. De race begint nu.',
     cta:      '⚡ Start de jacht',
     accent:   '#7c3aed',

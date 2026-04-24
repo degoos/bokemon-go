@@ -5,6 +5,8 @@ export default function StealFlow({ challenge, player, team, catches, onClose })
   const [phase, setPhase] = useState('rps') // rps | won_pick | done
   const [enemyCatches, setEnemyCatches] = useState([])
   const [result, setResult] = useState(null) // 'won' | 'lost'
+  const [mirrorEffect, setMirrorEffect] = useState(null) // active_effects rij voor Mirror Coat
+  const [mirrorTriggered, setMirrorTriggered] = useState(false)
 
   const isAttacker = challenge?.attacker_team_id === team?.id
 
@@ -15,16 +17,61 @@ export default function StealFlow({ challenge, player, team, catches, onClose })
     }
   }, [challenge, catches, isAttacker])
 
+  // Check of Mirror Coat ready staat — alleen bij start van het scherm
+  useEffect(() => {
+    if (!team?.id || !challenge?.game_session_id) return
+    supabase.from('active_effects')
+      .select('*').eq('game_session_id', challenge.game_session_id)
+      .eq('team_id', team.id).eq('item_key', 'mirror_coat').eq('is_active', true)
+      .maybeSingle()
+      .then(({ data }) => setMirrorEffect(data))
+  }, [team?.id, challenge?.game_session_id])
+
   async function handleResult(won) {
-    setResult(won ? 'won' : 'lost')
-    const winnerTeamId = won ? team.id : (isAttacker ? challenge.defender_team_id : challenge.attacker_team_id)
+    let effectiveWon = won
+    let mirrorWasUsed = false
+
+    // Mirror Coat: bij verlies + ready → automatisch omdraaien
+    if (!won && mirrorEffect && !mirrorTriggered) {
+      mirrorWasUsed = true
+      effectiveWon = true
+      setMirrorTriggered(true)
+      // 1. Active effect deactiveren
+      await supabase.from('active_effects').update({ is_active: false }).eq('id', mirrorEffect.id)
+      // 2. Item-quantity aftrekken
+      const { data: invRow } = await supabase.from('team_inventory')
+        .select('*').eq('game_session_id', challenge.game_session_id)
+        .eq('team_id', team.id).eq('item_key', 'mirror_coat').maybeSingle()
+      if (invRow) {
+        const newQty = Math.max(0, (invRow.quantity || 0) - 1)
+        if (newQty === 0) await supabase.from('team_inventory').delete().eq('id', invRow.id)
+        else await supabase.from('team_inventory').update({ quantity: newQty, updated_at: new Date().toISOString() }).eq('id', invRow.id)
+      }
+      // 3. Markering op challenge zetten zodat resultaat correct is
+      await supabase.from('steal_challenges').update({ mirror_used: true }).eq('id', challenge.id)
+    }
+
+    setResult(effectiveWon ? 'won' : 'lost')
+    const winnerTeamId = effectiveWon ? team.id : (isAttacker ? challenge.defender_team_id : challenge.attacker_team_id)
     await supabase.from('steal_challenges').update({
       status: 'finished',
       winner_team_id: winnerTeamId,
       finished_at: new Date().toISOString(),
     }).eq('id', challenge.id)
 
-    if (won && isAttacker) {
+    if (mirrorWasUsed) {
+      // Notificatie naar tegenstander
+      const enemyTeamId = isAttacker ? challenge.defender_team_id : challenge.attacker_team_id
+      await supabase.from('notifications').insert({
+        game_session_id: challenge.game_session_id,
+        title: '🪞 Mirror Coat!',
+        message: 'De tegenstander draaide jullie verlies om met Mirror Coat.',
+        type: 'warning', emoji: '🪞',
+        target_team_id: enemyTeamId,
+      })
+    }
+
+    if (effectiveWon && isAttacker) {
       setPhase('won_pick')
     } else {
       setPhase('done')
@@ -63,10 +110,18 @@ export default function StealFlow({ challenge, player, team, catches, onClose })
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <div style={{ fontSize: 72, marginBottom: 20 }}>✊✌️🖐️</div>
             <h2 style={{ marginBottom: 12 }}>Steen Schaar Papier</h2>
-            <p style={{ color: 'var(--text2)', lineHeight: 1.6, marginBottom: 32, fontSize: 15 }}>
+            <p style={{ color: 'var(--text2)', lineHeight: 1.6, marginBottom: 16, fontSize: 15 }}>
               Speel <strong style={{ color: 'var(--text)' }}>best-of-3</strong> fysiek met de aangetikte persoon.<br />
               Geef daarna het resultaat in:
             </p>
+            {mirrorEffect && (
+              <div style={{
+                background: 'rgba(168,85,247,0.18)', border: '1px solid #c084fc',
+                borderRadius: 10, padding: '8px 12px', marginBottom: 20, fontSize: 13, color: '#c084fc',
+              }}>
+                🪞 <strong>Mirror Coat ready</strong> — bij verlies wordt het automatisch omgedraaid
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 16px' }}>
               <button className="btn btn-success" onClick={() => handleResult(true)}>
                 🏆 Wij hebben gewonnen
