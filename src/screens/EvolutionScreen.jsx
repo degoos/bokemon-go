@@ -86,14 +86,18 @@ export default function EvolutionScreen({ sessionId, team, catches: catchesProp,
   }, [sessionId, team?.id])
 
   // ── Geef huidige request terug voor een catch ─────────────────
+  // Approved-banner tonen we via `justEvolved` (4s flash) — niet via recent-resolved,
+  // anders blokkeert hij 30s de knop voor de volgende evolutiestap.
+  // Recent afgewezen laten we wel 30s staan zodat de trainer de reden ziet.
   function getRequest(catchId) {
     const pending = requests.find(r => r.catch_id === catchId && r.status === 'pending')
     if (pending) return pending
-    // Recent afgehandeld (<30s geleden) ook tonen
-    const recent = requests
-      .filter(r => r.catch_id === catchId && r.resolved_at)
+    const recentRejected = requests
+      .filter(r => r.catch_id === catchId && r.status === 'rejected' && r.resolved_at)
       .sort((a, b) => new Date(b.resolved_at) - new Date(a.resolved_at))[0]
-    if (recent && Date.now() - new Date(recent.resolved_at).getTime() < 30_000) return recent
+    if (recentRejected && Date.now() - new Date(recentRejected.resolved_at).getTime() < 30_000) {
+      return recentRejected
+    }
     return null
   }
 
