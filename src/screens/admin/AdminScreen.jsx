@@ -110,6 +110,13 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   const [shopActive, setShopActive] = useState(false)
   // Mobiele Shop catalog (configureerbare items + prijs) — gesynced met session.mobile_shop_items
   const [shopItems, setShopItems] = useState([])
+  // Admin bericht state
+  const [msgTarget, setMsgTarget] = useState('all')   // 'all' | team-id
+  const [msgEmoji, setMsgEmoji]   = useState('📣')
+  const [msgType,  setMsgType]    = useState('info')  // info | warning | danger | success | event
+  const [msgTitle, setMsgTitle]   = useState('')
+  const [msgText,  setMsgText]    = useState('')
+  const [msgSending, setMsgSending] = useState(false)
   // HQ-locatie state (lat/lng), gesynced met session.hq_location
   const [hqLatLng, setHqLatLng] = useState({ lat: '', lng: '' })
   const [challenges, setChallenges] = useState([])
@@ -489,6 +496,28 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
 
   async function rejectEvent(eventId) {
     await supabase.from('events_log').update({ status: 'rejected' }).eq('id', eventId)
+  }
+
+  async function sendAdminMessage() {
+    const title = msgTitle.trim()
+    const text  = msgText.trim()
+    if (!title) return alert('Vul een titel in.')
+    setMsgSending(true)
+    const { error } = await supabase.from('notifications').insert({
+      game_session_id: initialSession.id,
+      target_team_id:  msgTarget === 'all' ? null : msgTarget,
+      title,
+      message: text || title,
+      type:    msgType,
+      emoji:   msgEmoji || '📣',
+    })
+    setMsgSending(false)
+    if (error) { alert('Fout: ' + error.message); return }
+    // Reset form
+    setMsgTitle('')
+    setMsgText('')
+    setMsgEmoji('📣')
+    setMsgType('info')
   }
 
   async function triggerEvent(key) {
@@ -1832,6 +1861,88 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               onClick={() => saveShopItems([...shopItems, { emoji: '🎁', name: '', prijs_slokken: 3 }])}>
               + Item toevoegen
             </button>
+          </div>
+
+          {/* ── Admin bericht sturen ───────────────────────────── */}
+          <div className="card">
+            <h3 style={{ marginBottom: 4 }}>📢 Stuur Bericht</h3>
+            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
+              Stuur een vrij bericht naar één team of iedereen. Verschijnt direct als notificatie in de app.
+            </div>
+
+            {/* Team-selector */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              <button
+                className={`btn btn-sm ${msgTarget === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ flex: 1, minWidth: 80 }}
+                onClick={() => setMsgTarget('all')}
+              >📣 Iedereen</button>
+              {teams.map(t => (
+                <button
+                  key={t.id}
+                  className={`btn btn-sm ${msgTarget === t.id ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ flex: 1, minWidth: 80, borderColor: msgTarget === t.id ? t.color : undefined, background: msgTarget === t.id ? t.color + '33' : undefined, color: msgTarget === t.id ? t.color : undefined }}
+                  onClick={() => setMsgTarget(t.id)}
+                >{t.emoji || ''} {t.name}</button>
+              ))}
+            </div>
+
+            {/* Type + emoji op één rij */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>Type</div>
+                <select
+                  value={msgType}
+                  onChange={e => setMsgType(e.target.value)}
+                  style={{ width: '100%', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 13 }}
+                >
+                  <option value="info">ℹ️ Info</option>
+                  <option value="warning">⚠️ Waarschuwing</option>
+                  <option value="danger">🚨 Gevaar</option>
+                  <option value="success">✅ Succes</option>
+                  <option value="event">⚡ Event</option>
+                </select>
+              </div>
+              <div style={{ width: 80 }}>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>Emoji</div>
+                <input
+                  value={msgEmoji}
+                  onChange={e => setMsgEmoji(e.target.value)}
+                  maxLength={4}
+                  style={{ width: '100%', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 20, textAlign: 'center' }}
+                />
+              </div>
+            </div>
+
+            {/* Titel */}
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>Titel <span style={{ color: 'var(--danger)' }}>*</span></div>
+              <input
+                value={msgTitle}
+                onChange={e => setMsgTitle(e.target.value)}
+                placeholder="bv. Opgelet: er is iets veranderd"
+                style={{ width: '100%', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', fontSize: 14, boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {/* Bericht (optioneel) */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>Bericht (optioneel)</div>
+              <textarea
+                value={msgText}
+                onChange={e => setMsgText(e.target.value)}
+                placeholder="Extra details…"
+                rows={2}
+                style={{ width: '100%', background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', fontSize: 13, resize: 'vertical', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%' }}
+              disabled={msgSending || !msgTitle.trim()}
+              onClick={sendAdminMessage}
+            >{msgSending ? 'Verzenden…' : '📤 Verstuur'}</button>
           </div>
 
           {/* Handicap uitdelen — geselecteerd uit handicap_definitions */}
