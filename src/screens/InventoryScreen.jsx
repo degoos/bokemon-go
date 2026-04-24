@@ -1,39 +1,27 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { POKEMON_TYPES } from '../lib/constants'
+import { ITEM_DETAILS } from '../lib/itemDetails'
 import TeamEmoji from '../components/TeamEmoji'
 
 // ─────────────────────────────────────────────────────────────
-// InventoryScreen — twee tabs (Bokémon + Items) + item-flows
+// InventoryScreen — "Rugzak" — toont uitsluitend items (Bokémon
+// zitten in de Pokédex). Elke item-kaart is uitklapbaar met
+// gedetailleerde uitleg (waarvoor dient 't, wanneer, hoe lang…).
 //
-// Items en hun gebruiksflows:
-//  - moon_stone   → in EvolutionScreen (niet hier inzetten)
+// Item-flows (mode):
+//  - moon_stone   → info_only (gebruik in EvolutionScreen)
 //  - silph_scope  → confirm → activate active_effect (X min) + notify enemy
 //  - protect      → kies eigen Bokémon → shield_active=true
 //  - double_team  → kies teamgenoot → fake locatie genereren (active_effect)
 //  - snatch       → kies Bokémon van tegenstander → direct gestolen
-//  - mirror_coat  → toggle 'gereserveerd' (active_effect) — wordt geconsumeerd door StealFlow
+//  - mirror_coat  → toggle 'gereserveerd' (active_effect, verbruikt door StealFlow)
 //  - pickup       → roll 3 random items → toevoegen aan inventory
-//  - poke_lure    → confirm → markeer "lure ready" (active_effect) → kaart toont Lure-modus
-//  - pokemon_egg  → toon recepten in Pokédex-modus
-//  - master_ball  → bevestig → markeer "next_catch_auto" (active_effect)
+//  - poke_lure    → confirm → kaart toont Lure-modus (3 min)
+//  - pokemon_egg  → info_only (recepten in Pokédex)
+//  - master_ball  → confirm → markeer "next_catch_auto" (active_effect)
 //
-// Patroon: eerst LIVE inventory ophalen via eigen sub (stale-prop pattern),
-// daarna pas useItem oproepen — zo voorkomen we race-conditions met realtime.
+// Patroon: eigen LIVE state via realtime sub (stale-prop pattern)
 // ─────────────────────────────────────────────────────────────
-
-const ITEM_USAGE = {
-  moon_stone:  { hint: 'Gebruik in trainingsfase — kies in Evolutie-scherm welke Bokémon evolueert.', mode: 'info_only' },
-  silph_scope: { hint: 'Activeer om tegenstanders X minuten te zien op de kaart.',                     mode: 'confirm' },
-  protect:     { hint: 'Kies één eigen Bokémon — wordt beschermd tegen steal.',                       mode: 'pick_own_catch' },
-  double_team: { hint: 'Kies een teamgenoot — er verschijnt een nep-locatie op de vijandelijke kaart.', mode: 'pick_teammate' },
-  snatch:      { hint: 'Kies een Bokémon van de tegenstander — wordt direct gestolen.',               mode: 'pick_enemy_catch' },
-  mirror_coat: { hint: 'Markeer als ready — bij verlies van de eerstvolgende RPS draait deze om.',    mode: 'toggle_ready' },
-  pickup:      { hint: 'Krijg 3 random items uit de pot.',                                            mode: 'roll_items' },
-  poke_lure:   { hint: 'Activeer en tik daarna op de spawn die je naar je toe wil halen.',           mode: 'confirm_lure' },
-  pokemon_egg: { hint: 'Recepten staan in de Pokédex onder "Ei-recepten".',                          mode: 'info_only' },
-  master_ball: { hint: 'Activeer — je eerstvolgende vangst gaat automatisch.',                        mode: 'confirm_master' },
-}
 
 // Welke items kunnen via Pickup uitkomen + relatieve gewichten (admin-tweakbaar later)
 const PICKUP_POOL = [
@@ -67,16 +55,26 @@ function offsetLatLng(lat, lng, meters = 80) {
   return { lat: +(lat + dLat).toFixed(7), lng: +(lng + dLng).toFixed(7) }
 }
 
+// Kleur + label voor fase-badge
+function phaseBadge(phase) {
+  const map = {
+    collecting: { bg: '#14350f', fg: '#86efac', label: '🌿 Verzamel' },
+    training:   { bg: '#1c2e1a', fg: '#86efac', label: '🧪 Training'  },
+    tournament: { bg: '#2d1a0e', fg: '#fbbf24', label: '🏆 Toernooi'  },
+    both:       { bg: '#1e1e3a', fg: '#c7d2fe', label: '♾️ Altijd'    },
+  }
+  return map[phase] || map.both
+}
+
 export default function InventoryScreen({
   catches: catchesProp, inventory: inventoryProp, effects: effectsProp,
   teams, players, player, team, sessionId, currentPhase, onClose,
 }) {
-  const [tab, setTab] = useState('pokemon')
   const [submitting, setSubmitting] = useState(null)
-  const [evoRequests, setEvoRequests] = useState([])
   const [activeFlow, setActiveFlow] = useState(null)   // {item, mode}
   const [pickupResult, setPickupResult] = useState(null) // [keys] na roll
   const [feedback, setFeedback] = useState(null) // {kind:'ok'|'err', msg}
+  const [expandedKey, setExpandedKey] = useState(null) // welke item-kaart is uitgeklapt
   const feedbackTimer = useRef(null)
 
   // ── Eigen LIVE state — stale-prop patroon (zie memory) ──
@@ -108,7 +106,6 @@ export default function InventoryScreen({
     return () => supabase.removeChannel(ch)
   }, [sessionId, player.id])
 
-  const isTrainingPhase = currentPhase === 'training'
   const myCatches    = liveCatches.filter(c => c.team_id === team?.id)
   const enemyCatches = liveCatches.filter(c => c.team_id && c.team_id !== team?.id && !c.shield_active)
   const myItems      = liveInventory.filter(i => i.team_id === team?.id)
@@ -128,63 +125,14 @@ export default function InventoryScreen({
     feedbackTimer.current = setTimeout(() => setFeedback(null), 2200)
   }
 
-  // ── Realtime evolution requests (voor labels op Bokémon) ───────
-  useEffect(() => {
-    if (!sessionId || !team?.id) return
-    supabase.from('evolution_requests')
-      .select('*').eq('game_session_id', sessionId).eq('team_id', team.id)
-      .then(({ data }) => setEvoRequests(data || []))
-    const ch = supabase.channel(`inv-evo-${sessionId}-${team.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'evolution_requests',
-        filter: `game_session_id=eq.${sessionId}` }, (payload) => {
-        setEvoRequests(prev => {
-          const idx = prev.findIndex(r => r.id === payload.new?.id)
-          if (payload.eventType === 'INSERT') return [payload.new, ...prev]
-          if (payload.eventType === 'UPDATE' && idx >= 0) {
-            const updated = [...prev]; updated[idx] = payload.new; return updated
-          }
-          return prev
-        })
-      }).subscribe()
-    return () => supabase.removeChannel(ch)
-  }, [sessionId, team?.id])
-
-  function getEvoRequest(catchId) {
-    const pending = evoRequests.find(r => r.catch_id === catchId && r.status === 'pending')
-    if (pending) return pending
-    const recent = evoRequests
-      .filter(r => r.catch_id === catchId && r.resolved_at)
-      .sort((a, b) => new Date(b.resolved_at) - new Date(a.resolved_at))[0]
-    if (recent && Date.now() - new Date(recent.resolved_at).getTime() < 20_000) return recent
-    return null
-  }
-
-  // ── Evolutie aanvragen (bier) ──────────────────────────────────
-  async function handleEvolve(catchItem) {
-    if (!catchItem || !team || !isTrainingPhase) return
-    const chain = catchItem.pokemon_definitions?.evolution_chain || []
-    if (catchItem.evolution_stage >= chain.length - 1) return
-    setSubmitting(catchItem.id)
-    await supabase.from('evolution_requests').insert({
-      game_session_id: sessionId,
-      catch_id:        catchItem.id,
-      team_id:         team.id,
-      from_stage:      catchItem.evolution_stage,
-      to_stage:        catchItem.evolution_stage + 1,
-      used_moon_stone: false,
-      status:          'pending',
-    })
-    setSubmitting(null)
-  }
-
   // ── Item gebruik: dispatch op mode ─────────────────────────────
   function startUseItem(invRow) {
     const key = invRow.item_key
-    const mode = ITEM_USAGE[key]?.mode || 'confirm'
+    const mode = ITEM_DETAILS[key]?.mode || 'confirm'
 
     // Voor "info only" (moon_stone, pokemon_egg): toon alleen hint, geen flow
     if (mode === 'info_only') {
-      flash(ITEM_USAGE[key].hint, 'ok')
+      flash(ITEM_DETAILS[key]?.when || 'Kan niet rechtstreeks vanuit de Rugzak worden ingezet', 'ok')
       return
     }
 
@@ -368,6 +316,16 @@ export default function InventoryScreen({
     flash('🏆 Master Ball ready — eerstvolgende vangst is automatisch!')
   }
 
+  // ── Active effects banner ─────────────────────────────────────
+  const activeEffectsMine = liveEffects.filter(e => e.team_id === team?.id && e.is_active)
+
+  // Sorteer items: kan-ingezet-nu bovenaan, info-only onderaan
+  const sortedItems = [...myItems.filter(i => i.quantity > 0)].sort((a, b) => {
+    const aInfo = ITEM_DETAILS[a.item_key]?.mode === 'info_only' ? 1 : 0
+    const bInfo = ITEM_DETAILS[b.item_key]?.mode === 'info_only' ? 1 : 0
+    return aInfo - bInfo
+  })
+
   // ─────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────
@@ -375,30 +333,10 @@ export default function InventoryScreen({
     <div className="screen">
       <div className="topbar">
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 22 }}>✕</button>
-        <h3>🎒 Inventaris</h3>
+        <h3>🎒 Rugzak</h3>
         <div style={{ color: 'var(--text2)', fontSize: 13 }}>
           <TeamEmoji emoji={team?.emoji} /> {team?.name}
         </div>
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
-        <button onClick={() => setTab('pokemon')} style={{
-          flex: 1, padding: '12px 0', background: 'none', border: 'none',
-          color: tab === 'pokemon' ? 'var(--accent)' : 'var(--text2)',
-          fontWeight: 700, fontSize: 14,
-          borderBottom: tab === 'pokemon' ? '2px solid var(--accent)' : '2px solid transparent',
-        }}>
-          ⚡ Bokémon ({myCatches.length})
-        </button>
-        <button onClick={() => setTab('items')} style={{
-          flex: 1, padding: '12px 0', background: 'none', border: 'none',
-          color: tab === 'items' ? 'var(--accent)' : 'var(--text2)',
-          fontWeight: 700, fontSize: 14,
-          borderBottom: tab === 'items' ? '2px solid var(--accent)' : '2px solid transparent',
-        }}>
-          🎒 Items ({myItems.filter(i => i.quantity > 0).length})
-        </button>
       </div>
 
       {/* Floating feedback toast */}
@@ -415,171 +353,166 @@ export default function InventoryScreen({
       )}
 
       <div className="scroll-area">
-        {/* ── BOKÉMON TAB ─────────────────────────────────────── */}
-        {tab === 'pokemon' && (
-          myCatches.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 48, color: 'var(--text2)' }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>🌱</div>
-              <p>Nog geen Bokémon gevangen.</p>
-              <p style={{ fontSize: 13, marginTop: 8 }}>Race naar de volgende spawn op de kaart!</p>
+        {/* Active effects banner */}
+        {activeEffectsMine.length > 0 && (
+          <div className="card" style={{
+            background: 'linear-gradient(135deg, #1e1b4b, #312e81)',
+            border: '1px solid #6366f1',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#c7d2fe', marginBottom: 6 }}>
+              ⚡ Actief in jullie team
             </div>
-          ) : (
-            myCatches.map(c => {
-              const p = c.pokemon_definitions
-              if (!p) return null
-              const chain       = p.evolution_chain || []
-              const currentName = chain[c.evolution_stage] || p.name
-              const nextName    = chain[c.evolution_stage + 1] || null
-              const canEvolve   = c.evolution_stage < chain.length - 1
-              const typeInfo    = POKEMON_TYPES[p.pokemon_type] || {}
-              const req         = getEvoRequest(c.id)
-              const isPending   = req?.status === 'pending'
-              const isApproved  = req?.status === 'approved'
-              const isRejected  = req?.status === 'rejected'
+            {activeEffectsMine.map(e => {
+              const def = liveInventory.find(i => i.item_key === e.item_key)?.item_definitions
+              const details = ITEM_DETAILS[e.item_key] || {}
+              const remaining = e.expires_at
+                ? Math.max(0, Math.ceil((new Date(e.expires_at) - Date.now()) / 60000))
+                : null
               return (
-                <div key={c.id} className="card" style={{
-                  display: 'flex', gap: 12, alignItems: 'flex-start',
-                  borderLeft: isApproved ? '3px solid var(--success)'
-                            : isPending  ? '3px solid var(--warning)'
-                            : isRejected ? '3px solid var(--danger)'
-                            : '3px solid transparent',
-                }}>
-                  <div style={{ fontSize: 40, filter: c.is_shiny ? 'drop-shadow(0 0 6px gold)' : 'none' }}>
-                    {c.is_mystery && !c.mystery_revealed ? '❓' : p.sprite_emoji}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontWeight: 800, fontSize: 16 }}>{currentName}</span>
-                      {c.is_shiny && <span style={{ color: 'gold', fontSize: 12 }}>✨</span>}
-                      <span className={`badge badge-${p.pokemon_type}`}>{typeInfo.emoji}</span>
-                    </div>
-                    <div style={{ color: 'var(--warning)', fontWeight: 700, fontSize: 18 }}>{c.cp} XP</div>
-                    <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 4 }}>
-                      {chain.map((n, i) => (
-                        <span key={i} style={{ color: i === c.evolution_stage ? 'var(--text)' : 'var(--border)', fontWeight: i === c.evolution_stage ? 700 : 400 }}>
-                          {i > 0 ? ' → ' : ''}{n}
-                        </span>
-                      ))}
-                    </div>
-
-                    {canEvolve && (
-                      <div style={{ marginTop: 8 }}>
-                        <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
-                          🍺 {p.linked_beer}{nextName ? ` → ${nextName}` : ''}
-                        </p>
-                        {!isTrainingPhase ? (
-                          <div style={{ fontSize: 12, color: 'var(--text2)' }}>🔒 Evolueren tijdens trainingsfase</div>
-                        ) : isApproved ? (
-                          <div style={{ fontSize: 13, color: 'var(--success)', fontWeight: 700 }}>✅ Evolutie goedgekeurd!</div>
-                        ) : isPending ? (
-                          <div style={{ fontSize: 13, color: 'var(--warning)', fontWeight: 700 }}>⏳ Wacht op Team Rocket…</div>
-                        ) : (
-                          <button
-                            className="btn btn-warning btn-sm"
-                            onClick={() => handleEvolve(c)}
-                            disabled={submitting === c.id}
-                            style={{ width: 'auto', padding: '8px 16px' }}
-                          >
-                            {submitting === c.id ? '⏳' : '⬆️ Evolueer'}
-                          </button>
-                        )}
-                        {isRejected && isTrainingPhase && (
-                          <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 4 }}>
-                            ❌ Geweigerd{req?.admin_note ? `: ${req.admin_note}` : ''}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {!canEvolve && chain.length > 1 && (
-                      <div style={{ marginTop: 4, fontSize: 12, color: 'var(--success)', fontWeight: 700 }}>✅ Max evolutie</div>
-                    )}
-                    {c.shield_active && (
-                      <div style={{ marginTop: 6, fontSize: 12, color: 'var(--info)' }}>🛡️ Protect actief</div>
-                    )}
-                  </div>
+                <div key={e.id} style={{ fontSize: 13, color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>{def?.emoji || details.emoji || '⭐'}</span>
+                  <span style={{ fontWeight: 700 }}>{def?.name || details.name || e.item_key}</span>
+                  {remaining !== null && <span style={{ color: '#818cf8' }}>· nog {remaining} min</span>}
+                  {!e.expires_at && <span style={{ color: '#818cf8' }}>· ready</span>}
                 </div>
               )
-            })
-          )
+            })}
+          </div>
         )}
 
-        {/* ── ITEMS TAB ────────────────────────────────────────── */}
-        {tab === 'items' && (
-          <>
-            {/* Active effects banner */}
-            {liveEffects.filter(e => e.team_id === team?.id && e.is_active).length > 0 && (
-              <div className="card" style={{
-                background: 'linear-gradient(135deg, #1e1b4b, #312e81)',
-                border: '1px solid #6366f1', marginBottom: 12,
-              }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: '#c7d2fe', marginBottom: 6 }}>
-                  ⚡ Actief in jullie team
-                </div>
-                {liveEffects.filter(e => e.team_id === team?.id && e.is_active).map(e => {
-                  const def = liveInventory.find(i => i.item_key === e.item_key)?.item_definitions
-                  const remaining = e.expires_at
-                    ? Math.max(0, Math.ceil((new Date(e.expires_at) - Date.now()) / 60000))
-                    : null
-                  return (
-                    <div key={e.id} style={{ fontSize: 13, color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span>{def?.emoji || '⭐'}</span>
-                      <span style={{ fontWeight: 700 }}>{def?.name || e.item_key}</span>
-                      {remaining !== null && <span style={{ color: '#818cf8' }}>· nog {remaining} min</span>}
-                      {!e.expires_at && <span style={{ color: '#818cf8' }}>· ready</span>}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+        {sortedItems.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 48, color: 'var(--text2)' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🎒</div>
+            <p>Je rugzak is leeg.</p>
+            <p style={{ fontSize: 13, marginTop: 8, lineHeight: 1.5 }}>
+              Items vind je via de Mobiele Shop (Team Rocket) of door het Team Rocket HQ binnen te dringen.
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {sortedItems.map(item => {
+              const key = item.item_key
+              const def = item.item_definitions
+              const details = ITEM_DETAILS[key] || {}
+              const isExpanded = expandedKey === key
+              const isMirrorReady = key === 'mirror_coat' && !!myActiveEffect('mirror_coat')
+              const phase = phaseBadge(details.phase)
+              const canUse = details.mode && details.mode !== 'info_only'
+              const phaseBlocked =
+                (details.phase === 'collecting' && currentPhase !== 'collecting') ||
+                (details.phase === 'training'   && currentPhase !== 'training')   ||
+                (details.phase === 'tournament' && currentPhase !== 'tournament')
 
-            {myItems.filter(i => i.quantity > 0).length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 48, color: 'var(--text2)' }}>
-                <div style={{ fontSize: 48, marginBottom: 12 }}>🎒</div>
-                <p>Geen items in bezit.</p>
-                <p style={{ fontSize: 13, marginTop: 8, lineHeight: 1.5 }}>
-                  Items vind je via de Mobiele Shop (Team Rocket) of door het Team Rocket HQ binnen te dringen.
-                </p>
-              </div>
-            ) : (
-              <div className="inv-grid">
-                {myItems.filter(i => i.quantity > 0).map(item => {
-                  const key  = item.item_key
-                  const def  = item.item_definitions
-                  const hint = ITEM_USAGE[key]?.hint
-                  const isMirrorReady = key === 'mirror_coat' && !!myActiveEffect('mirror_coat')
-                  return (
-                    <button
-                      key={item.id}
-                      className="inv-card"
-                      onClick={() => startUseItem(item)}
-                      disabled={submitting === item.id}
-                      style={{
-                        cursor: 'pointer',
-                        border: isMirrorReady ? '2px solid #c084fc' : '1px solid var(--border)',
-                        background: isMirrorReady ? 'rgba(168,85,247,0.15)' : undefined,
-                        opacity: submitting === item.id ? 0.6 : 1,
-                      }}
-                    >
-                      <div className="item-emoji">{def?.emoji}</div>
-                      <div style={{ fontWeight: 700, fontSize: 14, margin: '6px 0 2px' }}>
-                        {def?.name}
-                        {isMirrorReady && <span style={{ color: '#c084fc', marginLeft: 4 }}>✓</span>}
+              return (
+                <div
+                  key={item.id}
+                  className="card"
+                  style={{
+                    padding: 0,
+                    border: isMirrorReady ? '2px solid #c084fc' : '1px solid var(--border)',
+                    background: isMirrorReady ? 'rgba(168,85,247,0.12)' : undefined,
+                    overflow: 'hidden',
+                  }}
+                >
+                  {/* Klikbare kop — altijd zichtbaar */}
+                  <button
+                    onClick={() => setExpandedKey(isExpanded ? null : key)}
+                    style={{
+                      width: '100%', background: 'none', border: 'none', color: 'var(--text)',
+                      padding: '12px 14px', textAlign: 'left', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 12,
+                    }}
+                  >
+                    <div style={{ fontSize: 32, flexShrink: 0 }}>{def?.emoji || details.emoji || '⭐'}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 800, fontSize: 15 }}>
+                          {def?.name || details.name || key}
+                        </span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 800,
+                          background: phase.bg, color: phase.fg,
+                          padding: '2px 7px', borderRadius: 99,
+                        }}>
+                          {phase.label}
+                        </span>
+                        {isMirrorReady && <span style={{ color: '#c084fc', fontSize: 11, fontWeight: 700 }}>READY</span>}
                       </div>
-                      <div className="item-qty">×{item.quantity}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
-                        {def?.description}
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2, lineHeight: 1.3 }}>
+                        {details.short || def?.description || ''}
                       </div>
-                      {hint && (
-                        <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 6, fontStyle: 'italic', lineHeight: 1.3 }}>
-                          {hint}
+                    </div>
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0,
+                    }}>
+                      <div style={{
+                        fontWeight: 900, fontSize: 16, color: 'var(--warning)',
+                        minWidth: 32, textAlign: 'center',
+                      }}>×{item.quantity}</div>
+                      <div style={{ fontSize: 14, color: 'var(--text2)' }}>
+                        {isExpanded ? '▲' : '▼'}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Uitgeklapte details */}
+                  {isExpanded && (
+                    <div style={{
+                      padding: '4px 14px 14px 14px',
+                      borderTop: '1px solid var(--border)',
+                      background: 'rgba(0,0,0,0.15)',
+                    }}>
+                      {details.what && (
+                        <InfoRow icon="🎯" label="Wat doet het?" text={details.what} />
+                      )}
+                      {details.when && (
+                        <InfoRow icon="⏰" label="Wanneer inzetten?" text={details.when} />
+                      )}
+                      {details.effect && (
+                        <InfoRow icon="✨" label="Effect" text={details.effect} />
+                      )}
+                      {details.note && (
+                        <InfoRow icon="ℹ️" label="Let op" text={details.note} />
+                      )}
+
+                      {/* Gebruik-knop (indien toepasbaar) */}
+                      {canUse && (
+                        <div style={{ marginTop: 12 }}>
+                          {phaseBlocked ? (
+                            <div style={{
+                              fontSize: 12, color: 'var(--text2)', textAlign: 'center',
+                              padding: 10, background: 'rgba(148,163,184,0.12)',
+                              borderRadius: 8, border: '1px dashed var(--border)',
+                            }}>
+                              🔒 Alleen te gebruiken tijdens de {phase.label.toLowerCase()}fase
+                            </div>
+                          ) : (
+                            <button
+                              className="btn btn-success"
+                              onClick={() => startUseItem(item)}
+                              disabled={submitting === item.id}
+                              style={{ width: '100%' }}
+                            >
+                              {submitting === item.id ? '⏳' : `${def?.emoji || details.emoji || '⭐'} Inzetten`}
+                            </button>
+                          )}
                         </div>
                       )}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </>
+                      {!canUse && (
+                        <div style={{
+                          marginTop: 10, fontSize: 12, color: 'var(--text2)', textAlign: 'center',
+                          padding: 10, background: 'rgba(59,130,246,0.08)',
+                          borderRadius: 8, border: '1px dashed #334155',
+                        }}>
+                          ℹ️ Dit item wordt automatisch ingezet op de juiste plek in het spel.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
       </div>
 
@@ -618,6 +551,20 @@ export default function InventoryScreen({
   )
 }
 
+function InfoRow({ icon, label, text }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, marginTop: 10, fontSize: 13, lineHeight: 1.5 }}>
+      <div style={{ fontSize: 16, flexShrink: 0, width: 22, textAlign: 'center' }}>{icon}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>
+          {label}
+        </div>
+        <div style={{ color: 'var(--text)' }}>{text}</div>
+      </div>
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────
 // Subcomponent: bodies per flow-mode
 // ─────────────────────────────────────────────────────────────
@@ -627,8 +574,9 @@ function ItemFlowBody({
   onCancel, onSilph, onProtect, onDouble, onSnatch, onMirror, onLure, onMaster,
 }) {
   const def = flow.inv?.item_definitions
-  const headerEmoji = def?.emoji || '⭐'
-  const headerName  = def?.name  || flow.key
+  const details = ITEM_DETAILS[flow.key] || {}
+  const headerEmoji = def?.emoji || details.emoji || '⭐'
+  const headerName  = def?.name  || details.name  || flow.key
 
   return (
     <>
@@ -636,7 +584,7 @@ function ItemFlowBody({
         <div style={{ fontSize: 36 }}>{headerEmoji}</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 800, fontSize: 18 }}>{headerName}</div>
-          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{def?.description}</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{details.short || def?.description}</div>
         </div>
         <button onClick={onCancel} style={{
           background: 'none', border: 'none', color: 'var(--text2)', fontSize: 22, cursor: 'pointer',
@@ -756,24 +704,20 @@ function ItemFlowBody({
           </p>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 14, marginBottom: 20, flexWrap: 'wrap' }}>
             {pickupResult.map((key, i) => {
-              const meta = {
-                silph_scope: ['🔭','Silph Scope'], protect: ['🛡️','Protect'], double_team: ['🎭','Double Team'],
-                snatch: ['🧲','Snatch'], mirror_coat: ['🪞','Mirror Coat'], poke_lure: ['🎣','Poké Lure'],
-                moon_stone: ['🌙','Moon Stone'],
-              }[key] || ['❓', key]
+              const meta = ITEM_DETAILS[key] || { emoji: '❓', name: key }
               return (
                 <div key={i} style={{
                   background: '#0d1226', border: '1px solid var(--border)',
                   borderRadius: 12, padding: 14, textAlign: 'center', minWidth: 92,
                   animation: `bokePulse 1.${i}s ease-in-out infinite`,
                 }}>
-                  <div style={{ fontSize: 36 }}>{meta[0]}</div>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginTop: 4 }}>{meta[1]}</div>
+                  <div style={{ fontSize: 36 }}>{meta.emoji}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginTop: 4 }}>{meta.name}</div>
                 </div>
               )
             })}
           </div>
-          <button className="btn btn-success" onClick={onCancel}>OK — toegevoegd aan inventaris</button>
+          <button className="btn btn-success" onClick={onCancel}>OK — toegevoegd aan rugzak</button>
         </>
       )}
 

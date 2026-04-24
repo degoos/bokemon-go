@@ -7,13 +7,15 @@ import { useGameSession } from '../../hooks/useGameSession'
 import { usePlayerLocation } from '../../hooks/usePlayerLocation'
 import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM } from '../../lib/constants'
 import { getPolygonCenter, pointInPolygon } from '../../lib/geo'
-import { autoSpawnPokemon, startLegendaryPhase, buildSpawnNotification } from '../../lib/gameEngine'
+import { autoSpawnPokemon, startLegendaryPhase, buildSpawnNotification, createSnapshot } from '../../lib/gameEngine'
+import SaveManager from '../../components/SaveManager'
 import NotificationBanner from '../../components/NotificationBanner'
 import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
 import HandicapPicker from '../../components/HandicapPicker'
 import PokedexScreen from '../PokedexScreen'
 import TeamEmoji from '../../components/TeamEmoji'
+import BackpackManager from '../../components/admin/BackpackManager'
 import TournamentScreen from '../TournamentScreen'
 import FinaleScreen from '../FinaleScreen'
 import TestTools from './TestTools'
@@ -425,6 +427,51 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   }
 
   async function handlePhaseChange(newPhase) {
+    const curr = session?.status || initialSession.status || 'setup'
+
+    // Bij faseovergang van gameplay → volgende gameplay-fase: snapshot voorstellen.
+    // Pauze-vraag komt alleen als de fase daadwerkelijk verandert.
+    const isPhaseEnd = (
+      (curr === 'collecting' && ['training', 'tournament'].includes(newPhase)) ||
+      (curr === 'training'   && ['tournament'].includes(newPhase))
+    )
+    let shouldPause = false
+
+    if (isPhaseEnd) {
+      const label = curr === 'collecting' ? 'Verzamelfase'
+                  : curr === 'training'   ? 'Trainingsfase' : 'Fase'
+      const choice = window.confirm(
+        `${label} afsluiten en naar ${newPhase === 'training' ? 'trainingsfase' : 'toernooifase'} gaan?\n\n` +
+        'Klik OK om direct verder te gaan.\n' +
+        'Klik Annuleren om te pauzeren i.p.v. verder te gaan (voor later hervatten).'
+      )
+      if (!choice) {
+        shouldPause = window.confirm(
+          '⏸️ In plaats van verder: spel pauzeren en later hervatten?\n\n' +
+          'Er wordt automatisch een snapshot gemaakt. De fase blijft nog op ' +
+          `${label.toLowerCase()} totdat je hervat en opnieuw op deze knop klikt.`
+        )
+        if (!shouldPause) return
+      } else {
+        // Auto-snapshot vlak vóór de fase-wissel zodat de save de staat
+        // van de afgelopen fase bewaart (niet van de nieuwe)
+        await createSnapshot(initialSession.id, {
+          name: `Einde ${label.toLowerCase()} — ${new Date().toLocaleString('nl-BE')}`,
+          isAuto: true,
+        })
+      }
+    }
+
+    if (shouldPause) {
+      // Pauze: lopende fase blijft, maar is_paused wordt gezet
+      const { pauseSession } = await import('../../lib/gameEngine')
+      await pauseSession(initialSession.id, {
+        message: `${curr === 'collecting' ? 'Verzamelfase' : 'Trainingsfase'} is afgesloten. We gaan later verder.`,
+      })
+      refetch()
+      return
+    }
+
     const { error } = await supabase
       .from('game_sessions')
       .update({ status: newPhase })
@@ -659,7 +706,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       {(() => {
         const pendingEvoCount = evoRequests.filter(r => r.status === 'pending').length
         const isTestMode = !!session?.is_test_mode
-        const baseTabs = [['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['tournament','🏆'], ['finale','⚔️'], ['setup','⚙️']]
+        const baseTabs = [['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['tournament','🏆'], ['finale','⚔️'], ['saves','💾'], ['setup','⚙️']]
         const tabs = isTestMode ? [...baseTabs, ['test','🧪']] : baseTabs
         return (
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
@@ -779,6 +826,9 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               </div>
             )}
           </div>
+
+          {/* Rugzak (items) per team — admin kan toewijzen/verwijderen */}
+          <BackpackManager sessionId={initialSession.id} teams={teams} />
 
           {/* Opdrachten wachten op toewijzing (enkel als type bepaald is) */}
           {spawns.filter(s =>
@@ -913,6 +963,11 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               >
                 ⏹️ Spel Afsluiten
               </button>
+            </div>
+
+            {/* ── Pauze-snelknop ───────────────────────── */}
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <SaveManager session={session || initialSession} teams={teams} compact={true} />
             </div>
 
             {/* ── Test-modus toggle ───────────────────────── */}
@@ -1638,6 +1693,13 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             isAdmin={true}
             onClose={() => setTab('tournament')}
           />
+        </div>
+      )}
+
+      {/* Saves tab — snapshots beheren, pauzeren/hervatten, nieuwe sessie uit save */}
+      {tab === 'saves' && (
+        <div className="scroll-area">
+          <SaveManager session={session || initialSession} teams={teams} compact={false} />
         </div>
       )}
 

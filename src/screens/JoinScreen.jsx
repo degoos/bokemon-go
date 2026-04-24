@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { listSnapshots, createSessionFromSnapshot } from '../lib/gameEngine'
 import TeamEmoji from '../components/TeamEmoji'
 
 export default function JoinScreen({ onJoin }) {
-  const [step, setStep] = useState('code') // code | team | admin_setup
+  const [step, setStep] = useState('code') // code | team | admin_setup | admin_load_save
   const [gameCode, setGameCode] = useState('')
+  const [snapshots, setSnapshots] = useState([])
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false)
   const [name, setName] = useState('')
   const [adminKey, setAdminKey] = useState('')
   const [session, setSession] = useState(null)
@@ -81,6 +84,49 @@ export default function JoinScreen({ onJoin }) {
     localStorage.setItem('bokemon_session_id', sess.id)
     localStorage.setItem('bokemon_is_admin', '1')
     onJoin({ player, session: sess, isAdmin: true })
+  }
+
+  // Admin: laad alle beschikbare snapshots uit de DB om te kiezen.
+  async function openLoadSave() {
+    if (adminSetup.adminPass !== 'rocket') { setError('Verkeerde admin-code.'); return }
+    if (!adminSetup.adminName.trim()) { setError('Geef eerst je naam in.'); return }
+    setError('')
+    setSnapshotsLoading(true)
+    const { data } = await listSnapshots(null, 30)
+    setSnapshots(data || [])
+    setSnapshotsLoading(false)
+    setStep('admin_load_save')
+  }
+
+  // Admin: start een nieuwe sessie vanuit een gekozen snapshot.
+  async function handleLoadSnapshot(snap) {
+    if (!window.confirm(
+      `Nieuwe sessie starten vanuit snapshot "${snap.name}"?\n\n` +
+      'Alle catches, items en teams worden gekopieerd. ' +
+      'Er wordt een nieuwe game_code gegenereerd.'
+    )) return
+    setError(''); setLoading(true)
+
+    const { data: newSess, error: snapErr } = await createSessionFromSnapshot(snap.id, {
+      newName: adminSetup.sessionName?.trim() || undefined,
+    })
+    if (snapErr || !newSess) {
+      setError('Kon snapshot niet laden: ' + (snapErr?.message || snapErr || 'onbekende fout'))
+      setLoading(false); return
+    }
+
+    // Maak de admin-trainer aan in de nieuwe sessie
+    const { data: player } = await supabase.from('players').insert({
+      game_session_id: newSess.id,
+      name: adminSetup.adminName.trim(),
+      is_admin: true, is_online: true,
+    }).select().single()
+    if (!player) { setError('Fout bij aanmaken admin-trainer.'); setLoading(false); return }
+
+    localStorage.setItem('bokemon_player_id', player.id)
+    localStorage.setItem('bokemon_session_id', newSess.id)
+    localStorage.setItem('bokemon_is_admin', '1')
+    onJoin({ player, session: newSess, isAdmin: true })
   }
 
   return (
@@ -202,10 +248,57 @@ export default function JoinScreen({ onJoin }) {
             <button className="btn btn-primary" type="submit" disabled={loading}>
               {loading ? '⏳ Aanmaken...' : '🚀 Game Aanmaken'}
             </button>
+            <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }}
+              disabled={loading || snapshotsLoading} onClick={openLoadSave}>
+              {snapshotsLoading ? '⏳ Laden...' : '💾 Laden vanuit eerdere save'}
+            </button>
             <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }} onClick={() => { setStep('code'); setError('') }}>
               ← Terug
             </button>
           </form>
+        )}
+
+        {/* Admin: laad een snapshot en maak een nieuwe sessie aan */}
+        {step === 'admin_load_save' && (
+          <div>
+            <h3 style={{ textAlign: 'center', marginBottom: 16 }}>💾 Kies een save</h3>
+            <p style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center', marginBottom: 16 }}>
+              Selecteer een snapshot om een nieuwe sessie mee te starten. De huidige sessie van de snapshot blijft bestaan.
+            </p>
+            {snapshots.length === 0 && !snapshotsLoading && (
+              <div style={{ textAlign: 'center', color: 'var(--text2)', fontSize: 13, padding: 20 }}>
+                Nog geen snapshots gevonden.
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '60vh', overflowY: 'auto', marginBottom: 16 }}>
+              {snapshots.map(s => {
+                const summ = s.summary || {}
+                return (
+                  <button key={s.id} type="button" onClick={() => handleLoadSnapshot(s)}
+                    disabled={loading}
+                    style={{
+                      textAlign: 'left', padding: 12, borderRadius: 12,
+                      border: '1px solid var(--border)', background: 'var(--card)',
+                      cursor: loading ? 'default' : 'pointer', color: 'var(--text)',
+                    }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>
+                      {s.is_auto ? '🤖' : '👤'} {s.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                      {new Date(s.created_at).toLocaleString('nl-BE')} · {s.status_at_save}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+                      🎯 {summ.total_catches || 0} catches · 🎒 {summ.items_total || 0} items
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+            {error && <p style={{ color: 'var(--danger)', textAlign: 'center', marginBottom: 12, fontSize: 14 }}>{error}</p>}
+            <button type="button" className="btn btn-ghost" onClick={() => { setStep('admin_setup'); setError('') }}>
+              ← Terug
+            </button>
+          </div>
         )}
       </div>
     </div>

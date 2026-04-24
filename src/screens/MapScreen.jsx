@@ -19,6 +19,7 @@ import EvolutionScreen from './EvolutionScreen'
 import TournamentScreen from './TournamentScreen'
 import FinaleScreen from './FinaleScreen'
 import HQScreen from './HQScreen'
+import PausedOverlay from '../components/PausedOverlay'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -410,6 +411,11 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
     && legendaryDistance > LEGENDARY_REVEAL_RADIUS
 
   const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi','finale','hq'].includes(activeTab)
+
+  // ── Spel gepauzeerd: trainers zien wachtscherm, admin mag door ─
+  if (session?.is_paused && !isAdmin) {
+    return <PausedOverlay session={session} onSignOut={onSignOut} />
+  }
 
   // ── Setup-fase: toon wachtscherm i.p.v. lege kaart ────────────
   if (isSetup) {
@@ -1024,9 +1030,9 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
             </button>
           )}
 
-          {/* Items: altijd aanwezig */}
+          {/* Rugzak: altijd aanwezig */}
           <button className={`bottombar-btn ${activeTab==='inventory'?'active':''}`} onClick={() => setActiveTab('inventory')}>
-            <span className="icon">🎒</span><span>Items</span>
+            <span className="icon">🎒</span><span>Rugzak</span>
           </button>
 
           {/* Pokédex: altijd aanwezig */}
