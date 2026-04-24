@@ -17,6 +17,7 @@ import PokedexScreen from './PokedexScreen'
 import EvolutionScreen from './EvolutionScreen'
 import TournamentScreen from './TournamentScreen'
 import FinaleScreen from './FinaleScreen'
+import HQScreen from './HQScreen'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -352,7 +353,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   // Spawns enkel tonen in verzamelfase (tijdens training/toernooi zijn er geen actieve vangsten)
   const visibleSpawns = isCollecting ? spawns : []
 
-  const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi','finale'].includes(activeTab)
+  const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi','finale','hq'].includes(activeTab)
 
   // ── Setup-fase: toon wachtscherm i.p.v. lege kaart ────────────
   if (isSetup) {
@@ -634,6 +635,14 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
           onClose={() => setActiveTab('toernooi')}
         />
       )}
+      {activeTab === 'hq' && (
+        <HQScreen
+          sessionId={session.id}
+          team={team}
+          player={player}
+          onClose={() => setActiveTab('map')}
+        />
+      )}
 
       {/* Pokéball throw-animatie voor de catch start */}
       {throwingAt && (
@@ -672,12 +681,28 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
                     </div>
                     <div style={{
                       background: '#1a0f0f', border: '1px solid #7f1d1d', borderRadius: 10,
-                      padding: 12, fontSize: 13, color: '#fca5a5', lineHeight: 1.5, marginBottom: 10,
+                      padding: 12, fontSize: 13, color: '#fca5a5', lineHeight: 1.5, marginBottom: 12,
                     }}>
                       🚪 <strong>3 kamers wachten</strong>: Vuilbak-zoektocht (Ingang) → Spinner Tiles (Beveiligingszaal) → Strength Boulders (Kluis).
                       <br /><br />
-                      <em>De mini-games komen in een volgende update. Voor nu: kom hier fysiek samen — Team Rocket controleert je legitimiteit.</em>
+                      <em>Kraak ze om aan zeldzame items te komen — elk team werkt zich onafhankelijk door de kamers.</em>
                     </div>
+                    {inRange ? (
+                      <button
+                        className="btn btn-warning"
+                        onClick={() => { setPoiPanel(null); setActiveTab('hq') }}
+                        style={{ width: '100%' }}
+                      >
+                        🚪 Binnendringen
+                      </button>
+                    ) : (
+                      <div style={{
+                        fontSize: 12, color: 'var(--text2)', textAlign: 'center', padding: '10px 0',
+                        background: '#0f0a0a', borderRadius: 10, border: '1px dashed #7f1d1d',
+                      }}>
+                        🚶 Kom dichterbij om binnen te dringen
+                      </div>
+                    )}
                   </>
                 )
               })()}
