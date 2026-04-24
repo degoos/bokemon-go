@@ -330,6 +330,39 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
     if (currentPhase === 'tournament' && activeTab !== 'toernooi') setActiveTab('toernooi')
   }, [currentPhase]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-navigeer naar de finale zodra admin hem start (onafhankelijk van
+  // toernooi-state — zodat finale altijd speelbaar blijft, ook als het
+  // toernooi om een of andere reden niet werkte).
+  // We switchen enkel als de speler niet middenin een flow zit die we
+  // niet willen onderbreken (catch/steal/hq).
+  useEffect(() => {
+    if (!session?.id) return
+    const NAV_PROTECTED = ['catch', 'steal', 'hq']
+    let alive = true
+    async function initialCheck() {
+      const { data } = await supabase.from('finale_state')
+        .select('phase').eq('game_session_id', session.id).maybeSingle()
+      if (!alive || !data) return
+      if (data.phase && data.phase !== 'finished' && !NAV_PROTECTED.includes(activeTab)) {
+        setActiveTab('finale')
+      }
+    }
+    initialCheck()
+    const ch = supabase.channel(`finale-nav-${session.id}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'finale_state',
+        filter: `game_session_id=eq.${session.id}`,
+      }, payload => {
+        const newPhase = payload.new?.phase
+        if (!newPhase) return
+        if (newPhase !== 'finished' && !NAV_PROTECTED.includes(activeTab)) {
+          setActiveTab('finale')
+        }
+      })
+      .subscribe()
+    return () => { alive = false; supabase.removeChannel(ch) }
+  }, [session?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fase-intro tonen bij fase-wissel (enkel 1x per fase, niet tijdens setup)
   useEffect(() => {
     const introPhases = ['collecting', 'training', 'tournament']
