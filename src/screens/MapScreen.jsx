@@ -11,6 +11,7 @@ import CatchFlow from '../components/CatchFlow'
 import StealFlow from '../components/StealFlow'
 import NotificationBanner from '../components/NotificationBanner'
 import PokeballThrow from '../components/PokeballThrow'
+import PhaseIntro from '../components/PhaseIntro'
 import InventoryScreen from './InventoryScreen'
 import PokedexScreen from './PokedexScreen'
 import EvolutionScreen from './EvolutionScreen'
@@ -189,6 +190,8 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   const [stealChallenge, setStealChallenge] = useState(null)
   const [areas, setAreas] = useState([])
   const [nowMs, setNowMs] = useState(Date.now())
+  const [activeIntro, setActiveIntro] = useState(null) // welke fase-intro tonen
+  const shownIntrosRef = useRef(new Set())             // bijhouden welke al getoond zijn
   const mapRef = useRef(null)
 
   // Derive own team from loaded data
@@ -233,6 +236,15 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
     if (currentPhase === 'training' && activeTab === 'map') setActiveTab('evolutie')
     if (currentPhase === 'tournament' && activeTab !== 'toernooi') setActiveTab('toernooi')
   }, [currentPhase]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fase-intro tonen bij fase-wissel (enkel 1x per fase, niet tijdens setup)
+  useEffect(() => {
+    const introPhases = ['collecting', 'training', 'tournament']
+    if (introPhases.includes(currentPhase) && !shownIntrosRef.current.has(currentPhase)) {
+      shownIntrosRef.current.add(currentPhase)
+      setActiveIntro(currentPhase)
+    }
+  }, [currentPhase])
 
   // Luister naar steal challenges gericht aan mijn team
   useEffect(() => {
@@ -333,6 +345,14 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
 
   return (
     <div className="screen">
+      {/* Fase-intro overlay (bovenop alles) */}
+      {activeIntro && (
+        <PhaseIntro
+          phase={activeIntro}
+          onDismiss={() => setActiveIntro(null)}
+        />
+      )}
+
       <NotificationBanner notifications={notifications} />
 
       {/* Kaart (altijd gerenderd, verborgen tijdens overlays) */}

@@ -176,7 +176,10 @@ export default function EvolutionScreen({ sessionId, team, catches: catchesProp,
     })
 
   function canEvolve(c) {
-    const chain = c.pokemon_definitions?.evolution_chain || []
+    const def = c.pokemon_definitions
+    if (!def) return false
+    const raw = Array.isArray(def.evolution_chain) ? def.evolution_chain : []
+    const chain = raw.length > 0 && raw[0] !== def.name ? [def.name, ...raw] : raw.length === 0 ? [def.name] : raw
     return c.evolution_stage < chain.length - 1
   }
 
@@ -244,7 +247,11 @@ export default function EvolutionScreen({ sessionId, team, catches: catchesProp,
         {myCatches.map(c => {
           const def      = c.pokemon_definitions
           if (!def) return null
-          const chain    = def.evolution_chain || []
+          // Normaliseer chain: basisvorm moet altijd op index 0 staan
+          const rawChain = Array.isArray(def.evolution_chain) ? def.evolution_chain : []
+          const chain    = rawChain.length > 0 && rawChain[0] !== def.name
+            ? [def.name, ...rawChain]
+            : rawChain.length === 0 ? [def.name] : rawChain
           const typeInfo = POKEMON_TYPES[def.pokemon_type] || {}
           const curName  = chain[c.evolution_stage] || def.name
           const nextName = chain[c.evolution_stage + 1] || null
