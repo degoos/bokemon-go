@@ -14,6 +14,7 @@ import ChallengeLibrary from '../../components/ChallengeLibrary'
 import PokedexScreen from '../PokedexScreen'
 import TournamentScreen from '../TournamentScreen'
 import FinaleScreen from '../FinaleScreen'
+import TestTools from './TestTools'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -617,9 +618,12 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       {/* Tab navigatie */}
       {(() => {
         const pendingEvoCount = evoRequests.filter(r => r.status === 'pending').length
+        const isTestMode = !!session?.is_test_mode
+        const baseTabs = [['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['tournament','🏆'], ['finale','⚔️'], ['setup','⚙️']]
+        const tabs = isTestMode ? [...baseTabs, ['test','🧪']] : baseTabs
         return (
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', overflow: 'hidden', flexShrink: 0 }}>
-            {[['dashboard','📊'], ['map','🗺️'], ['events','⚡'], ['pokedex','📖'], ['tournament','🏆'], ['finale','⚔️'], ['setup','⚙️']].map(([key, icon]) => (
+            {tabs.map(([key, icon]) => (
               <button key={key} onClick={() => setTab(key)} style={{
                 flex: 1, padding: '10px 0', background: 'none', border: 'none', cursor: 'pointer',
                 borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
@@ -1869,8 +1873,53 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             <ChallengeLibrary challenges={challenges} onUpdated={refreshChallenges} executionStats={opdrachtStats} />
           </div>
 
+          {/* ── Test-modus toggle ───────────────────────────── */}
+          <div className="card" style={{ borderLeft: '3px solid #a855f7' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ margin: 0, marginBottom: 4 }}>🧪 Test-modus</h3>
+                <p style={{ fontSize: 12, color: 'var(--text2)', margin: 0, lineHeight: 1.5 }}>
+                  Zet aan om de 🧪-tab te tonen met scenario-seeders, reset-knoppen en een item-editor. <strong style={{ color: '#a855f7' }}>Niet aanzetten tijdens een live spel.</strong>
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  const next = !session?.is_test_mode
+                  if (next) {
+                    if (!window.confirm('🧪 Test-modus activeren?\n\nDe 🧪-tab verschijnt met tools om catches/items te seeden en de state te wissen. Niet gebruiken tijdens een live spel met echte spelers.')) return
+                  }
+                  await supabase.from('game_sessions')
+                    .update({ is_test_mode: next })
+                    .eq('id', initialSession.id)
+                  refetch()
+                }}
+                style={{
+                  padding: '8px 14px', borderRadius: 99, border: 'none', cursor: 'pointer',
+                  fontWeight: 800, fontSize: 13, minWidth: 80,
+                  background: session?.is_test_mode ? '#a855f7' : 'var(--bg3)',
+                  color: session?.is_test_mode ? '#fff' : 'var(--text2)',
+                  boxShadow: session?.is_test_mode ? '0 0 14px #a855f766' : 'none',
+                }}
+              >
+                {session?.is_test_mode ? '🧪 AAN' : 'UIT'}
+              </button>
+            </div>
+          </div>
+
           <button className="btn btn-ghost" onClick={onSignOut}>🚪 Uitloggen</button>
         </div>
+      )}
+
+      {/* ═════════════ 🧪 Test & Simulatie tab ═════════════ */}
+      {tab === 'test' && session?.is_test_mode && (
+        <TestTools
+          session={session || initialSession}
+          sessionId={initialSession.id}
+          teams={teams}
+          pokemons={pokemons}
+          catches={catches}
+          onDone={refetch}
+        />
       )}
 
       {/* Challenge selector modal */}
