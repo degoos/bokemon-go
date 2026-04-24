@@ -1,4 +1,5 @@
--- Migration: voeg 'training' toe aan CHECK constraints + realtime voor alle gamplay-tabellen
+-- Migration: voeg 'training' toe aan CHECK constraints + realtime voor alle gameplay-tabellen
+-- Idempotent: veilig om meerdere keren te runnen
 -- !! RUNNEN IN SUPABASE SQL EDITOR !!
 
 -- ══════════════════════════════════════════════════════════════════
@@ -16,17 +17,23 @@ ALTER TABLE game_sessions
   CHECK (phase IN ('setup', 'collecting', 'training', 'tournament_prep', 'tournament', 'finished'));
 
 -- ══════════════════════════════════════════════════════════════════
--- 2. Realtime publicatie voor alle gameplay-tabellen
---    (was enkel game_sessions — hierdoor kwamen updates niet live
---     binnen in useGameSession voor catches, spawns, etc.)
+-- 2. Realtime publicatie — tabellen toevoegen als ze er nog niet in zitten
 -- ══════════════════════════════════════════════════════════════════
-ALTER PUBLICATION supabase_realtime ADD TABLE catches;
-ALTER PUBLICATION supabase_realtime ADD TABLE active_spawns;
-ALTER PUBLICATION supabase_realtime ADD TABLE players;
-ALTER PUBLICATION supabase_realtime ADD TABLE teams;
-ALTER PUBLICATION supabase_realtime ADD TABLE team_inventory;
-ALTER PUBLICATION supabase_realtime ADD TABLE active_effects;
-ALTER PUBLICATION supabase_realtime ADD TABLE events_log;
-ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
-ALTER PUBLICATION supabase_realtime ADD TABLE evolution_requests;
-ALTER PUBLICATION supabase_realtime ADD TABLE evolution_log;
+DO $$
+DECLARE
+  tbl TEXT;
+  tables TEXT[] := ARRAY[
+    'catches', 'active_spawns', 'players', 'teams', 'team_inventory',
+    'active_effects', 'events_log', 'notifications',
+    'evolution_requests', 'evolution_log'
+  ];
+BEGIN
+  FOREACH tbl IN ARRAY tables LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND tablename = tbl
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', tbl);
+    END IF;
+  END LOOP;
+END $$;
