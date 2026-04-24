@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import VuilbakGame from '../components/hq/VuilbakGame'
 import SpinnerGame from '../components/hq/SpinnerGame'
 import BoulderGame from '../components/hq/BoulderGame'
+import TeamEmoji from '../components/TeamEmoji'
 
 // ─────────────────────────────────────────────────────────────
 // HQScreen — container voor het Team Rocket hoofdkwartier
@@ -31,6 +32,8 @@ const ITEM_INFO = {
 }
 
 // Loot per kamer — later configureerbaar via admin, hardcoded voor nu
+// Moon Stones zitten in kamer 2 + 3 zodat elk team dat HQ voltooit
+// gegarandeerd 2 Moon Stones heeft voor de trainingsfase (naast bier-evolutie).
 const ROOM_LOOT = {
   1: [
     { key: 'protect',     qty: 2 },
@@ -40,10 +43,12 @@ const ROOM_LOOT = {
   2: [
     { key: 'silph_scope', qty: 1 },
     { key: 'snatch',      qty: 1 },
+    { key: 'moon_stone',  qty: 1 },
   ],
   3: [
     { key: 'pokemon_egg', qty: 1 },
     { key: 'master_ball', qty: 1 }, // 1× per spel — uniciteits-check bij grant
+    { key: 'moon_stone',  qty: 1 },
   ],
 }
 
@@ -202,7 +207,7 @@ export default function HQScreen({ sessionId, team, player, onClose }) {
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#fca5a5', fontSize: 22 }}>✕</button>
         <h3 style={{ color: '#fca5a5' }}>🏚️ Team Rocket HQ</h3>
         <div style={{ color: 'var(--text2)', fontSize: 13 }}>
-          {team?.emoji} {team?.name}
+          <TeamEmoji emoji={team?.emoji} /> {team?.name}
         </div>
       </div>
 

@@ -245,17 +245,15 @@ export default function BoulderGame({ team, onComplete, onAbort }) {
         <span style={{ marginLeft: 'auto' }}>Zetten: {moves}</span>
       </div>
 
-      {/* Grid + sprite */}
-      <div style={{ padding: '0 14px' }}>
+      {/* Grid + sprite — flex-wrapper centreert inline-grid zodat absolute sprite correct aligneert */}
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '0 14px' }}>
         <div style={{
           '--cell': 'min(52px, 14vw)',
           '--gap': '4px',
-          display: 'grid',
+          display: 'inline-grid',
           gridTemplateColumns: `repeat(${SIZE}, var(--cell))`,
           gridTemplateRows: `repeat(${SIZE}, var(--cell))`,
           gap: 'var(--gap)',
-          justifyContent: 'center',
-          margin: '0 auto',
           position: 'relative',
         }}>
           {cells}

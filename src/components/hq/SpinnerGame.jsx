@@ -3,44 +3,46 @@ import { useState, useEffect, useRef } from 'react'
 // ─────────────────────────────────────────────────────────────
 // SpinnerGame — Kamer 2 (Beveiligingszaal)
 //
-// Geïnspireerd op Viridian City Gym: 6x6 grid met spinners (↑↓←→),
-// muren en twee drukschakelaars. De uitgang is VERGRENDELD tot
-// beide schakelaars geactiveerd zijn — en een schakelaar activeert
-// alléén als je erop LANDT via een spinner (lopen telt niet).
+// Geïnspireerd op Viridian City Gym: 6x6 grid met CHAIN-SPINNERS.
+// Een spinner schiet je door tot je op een andere spinner landt —
+// die neemt het over en stuwt je in zijn richting. Zo worden twee
+// schakelaars bereikt via cascades van 3-4 spinners.
 //
-// v2:
-//  - Walls: blokkeren zowel lopen als propulsie.
-//  - Switches (*): vereisen spinner-landing → lopen is niet genoeg.
-//  - Geanimeerde beweging (cel per cel) i.p.v. teleport.
-//  - Team-sprite (🧢/💧) met spin-animatie tijdens propulsie.
-//  - Trap-spinners die je terug naar beneden lanceren.
+// v3:
+//  - Sprite renderen BINNEN grid (flex-centering wrapper fix)
+//  - Chain propulsie: landen op spinner → nieuwe richting
+//  - Geen trap vlak naast goal → na switches is goal walking-reachable
+//  - Sprite roteert tijdens propulsie (spin animatie)
 // ─────────────────────────────────────────────────────────────
 
 const SIZE = 6
 const START = { x: 0, y: 0 }
 const EXIT  = { x: 5, y: 5 }
-const STEP_MS = 180
+const STEP_MS = 160
 
-// Muren (geen walking, geen propulsie)
-const WALLS = new Set([
-  '3,3', '3,4', '3,5', '4,5', // L-vorm muur rechts van midden
-])
+// Geen muren — lock op goal is voldoende barrière.
+const WALLS = new Set([])
 
-// Spinners: key 'x,y' → richting
-// (2,0) up       → propels door kolom 2 naar top, LANDT op switch A (2,5)
-// (1,2) right    → propels over rij 2 naar rechts, LANDT op switch B (5,2)
-// (0,4) down     → TRAP: terug naar (0,0)
-// (4,1) up       → nuttig na switches: springt naar (4,4) (bij (4,5) muur)
-// (5,4) down     → TRAP: schiet terug naar (5,0) (passeert switch B maar landt niet)
+// CHAIN-spinners. Propulsie slide stopt zodra een andere spinner
+// wordt geraakt; die neemt de richting over.
+//
+// Keten A (activeert Schakelaar A op (2,5)):
+//   (0,1)→  ⇒  (3,1)↑  ⇒  (3,4)←  ⇒  (2,4)↑  ⇒  land op (2,5)
+// Keten B (activeert Schakelaar B op (5,2)):
+//   (1,0)↑  ⇒  (1,2)→  ⇒  land op (5,2)
+// Trap:
+//   (4,5)↓  ⇒  schiet door kolom 4 omlaag tot (4,0) — verleiding vlak
+//              bij goal (als je via rij 5 van links naar rechts loopt).
 const SPINNERS = {
-  '2,0': 'up',
+  '0,1': 'right',
+  '3,1': 'up',
+  '1,0': 'up',
   '1,2': 'right',
-  '0,4': 'down',
-  '4,1': 'up',
-  '5,4': 'down',
+  '3,4': 'left',
+  '2,4': 'up',
+  '4,5': 'down',   // trap
 }
 
-// Schakelaars
 const SWITCH_A = '2,5'
 const SWITCH_B = '5,2'
 
@@ -49,29 +51,36 @@ const DELTA = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] }
 
 function isWall(x, y) { return WALLS.has(`${x},${y}`) }
 
-// Propel door tot aan muur of rand (geen chain-spinners)
-function propel(x, y, dir) {
-  const [dx, dy] = DELTA[dir]
-  let cx = x, cy = y
-  while (true) {
-    const nx = cx + dx, ny = cy + dy
-    if (nx < 0 || nx >= SIZE || ny < 0 || ny >= SIZE) break
-    if (isWall(nx, ny)) break
-    cx = nx; cy = ny
-  }
-  return [cx, cy]
-}
-
-function propulsionPath(x, y, dir) {
-  const [dx, dy] = DELTA[dir]
+// Chain-propulsie: slide in huidige richting tot aan muur/rand of tot
+// speler op een volgende spinner LANDT — dan neemt die de richting over.
+// Bezochte spinners tracken om eindeloze cycli te voorkomen.
+function propulsionPath(startX, startY, startDir) {
   const cells = []
-  let cx = x, cy = y
+  let cx = startX, cy = startY
+  let dir = startDir
+  const visitedSpinners = new Set([`${startX},${startY}`])
+
   while (true) {
-    const nx = cx + dx, ny = cy + dy
-    if (nx < 0 || nx >= SIZE || ny < 0 || ny >= SIZE) break
-    if (isWall(nx, ny)) break
-    cx = nx; cy = ny
-    cells.push([cx, cy])
+    const [dx, dy] = DELTA[dir]
+    let moved = false
+    while (true) {
+      const nx = cx + dx, ny = cy + dy
+      if (nx < 0 || nx >= SIZE || ny < 0 || ny >= SIZE) break
+      if (isWall(nx, ny)) break
+      cx = nx; cy = ny
+      cells.push([cx, cy])
+      moved = true
+      // Geland op een (nog niet gebruikte) spinner? Slide stopt.
+      if (SPINNERS[`${cx},${cy}`]) break
+    }
+    if (!moved) break
+    const key = `${cx},${cy}`
+    if (SPINNERS[key] && !visitedSpinners.has(key)) {
+      visitedSpinners.add(key)
+      dir = SPINNERS[key]
+      continue  // chain!
+    }
+    break
   }
   return cells
 }
@@ -115,7 +124,6 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
   }
 
   function animatePath(path, wasPropulsion, onFinish) {
-    // path: array of [x,y], elke cel wordt bezocht op volgorde
     setMoving(true)
     if (wasPropulsion) setSpinning(true)
     path.forEach(([x, y], i) => {
@@ -136,7 +144,6 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
       setMessage({ kind: 'err', text: '🧱 Een muur — kan hier niet langs.' })
       return
     }
-    // Vergrendelde uitgang?
     if (x === EXIT.x && y === EXIT.y && !(switchA && switchB)) {
       setMessage({ kind: 'err', text: '🔒 De deur is vergrendeld — activeer eerst beide schakelaars met een spinner!' })
       return
@@ -153,8 +160,7 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
         wasPropulsion = true
         setMessage({ kind: 'warn', text: `🌀 Spinner ${ARROW[spinner]} — je wordt voortgestuwd!` })
       } else {
-        // Spinner blokkeert direct door muur — speler blijft staan
-        setMessage({ kind: 'warn', text: `🌀 Spinner ${ARROW[spinner]} — maar een muur blokt de voortstuwing.` })
+        setMessage({ kind: 'warn', text: `🌀 Spinner ${ARROW[spinner]} — maar de propulsie wordt geblokkeerd.` })
       }
     } else {
       setMessage(null)
@@ -165,8 +171,6 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
     animatePath(path, wasPropulsion, () => {
       const [fx, fy] = path[path.length - 1]
       const finalKey = `${fx},${fy}`
-
-      // Switch-activering (alleen bij propulsie-landing)
       let newA = switchA, newB = switchB
       if (wasPropulsion) {
         if (finalKey === SWITCH_A && !switchA) {
@@ -176,11 +180,9 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
           setSwitchB(true); newB = true
           setMessage({ kind: 'ok', text: '⚡ Schakelaar B geactiveerd!' })
         }
-      } else if (finalKey === SWITCH_A || finalKey === SWITCH_B) {
-        // Lopen op een switch: hint
+      } else if ((finalKey === SWITCH_A && !switchA) || (finalKey === SWITCH_B && !switchB)) {
         setMessage({ kind: 'warn', text: '💡 Een schakelaar — maar lopen triggert hem niet. Gebruik een spinner!' })
       }
-
       if (fx === EXIT.x && fy === EXIT.y && newA && newB) {
         setDone(true)
         completedRef.current = true
@@ -200,16 +202,13 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
     startTimeRef.current = Date.now(); setElapsed(0)
   }
 
-  // Render-grid: y=SIZE-1 bovenaan, y=0 onderaan
-  const rows = []
+  // Bouw grid-cellen
+  const cells = []
   for (let y = SIZE - 1; y >= 0; y--) {
-    const cols = []
     for (let x = 0; x < SIZE; x++) {
       const key = `${x},${y}`
       const spinner = SPINNERS[key]
       const wall = WALLS.has(key)
-      const isPlayer = pos.x === x && pos.y === y
-      const isStart  = START.x === x && START.y === y
       const isExit   = EXIT.x === x && EXIT.y === y
       const adj      = isAdjacent(x, y) && !wall && !done && !moving
       const isSwitchA = key === SWITCH_A
@@ -243,9 +242,7 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
         border = exitUnlocked ? '2px solid #22c55e' : '2px solid #475569'
         color = exitUnlocked ? '#86efac' : '#64748b'
       }
-      if (adj) {
-        border = '2px dashed #facc15'
-      }
+      if (adj) border = '2px dashed #facc15'
 
       let label = ''
       if (wall) label = '🧱'
@@ -254,7 +251,7 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
       else if (isSwitchA) label = switchActive ? '🔵' : 'A'
       else if (isSwitchB) label = switchActive ? '🔵' : 'B'
 
-      cols.push(
+      cells.push(
         <button
           key={key}
           onClick={() => handleTileClick(x, y)}
@@ -262,37 +259,23 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
           style={{
             gridColumn: x + 1,
             gridRow: SIZE - y,
-            aspectRatio: '1/1',
-            background: bg,
-            border,
-            borderRadius: 6,
-            fontSize: 20,
-            fontWeight: 800,
-            color,
+            background: bg, border, borderRadius: 6,
+            fontSize: 20, fontWeight: 800, color,
             padding: 0,
             cursor: adj ? 'pointer' : 'default',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            position: 'relative',
             userSelect: 'none',
+            // Spinners draaien zachtjes om chain-karakter te tonen
+            animation: spinner && !moving ? 'spinRotate 3s linear infinite' : 'none',
           }}
         >
           {label}
-          {isPlayer && (
-            <div style={{
-              position: 'absolute', inset: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              pointerEvents: 'none',
-            }} />
-          )}
         </button>
       )
     }
-    rows.push(...cols)
   }
 
-  // Sprite-positie translate (gridkolom * (cel+gap); gridrij via SIZE-1-y)
-  // We gebruiken dezelfde CSS-custom properties als grid.
-  const visualRow = SIZE - 1 - pos.y   // 0 = top rij visueel
+  const visualRow = SIZE - 1 - pos.y
   const visualCol = pos.x
 
   return (
@@ -308,12 +291,12 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
         background: '#1a0a2e', border: '1px solid #6d28d9', borderRadius: 10,
         fontSize: 12, color: '#c4b5fd', lineHeight: 1.5,
       }}>
-        Tik een <strong style={{ color: '#facc15' }}>aangrenzende tegel</strong>. Een <strong style={{ color: '#a855f7' }}>🌀 spinner</strong> stuwt je voort tot aan een
-        <strong style={{ color: '#d6d3d1' }}> 🧱 muur</strong> of rand. De <strong style={{ color: '#22c55e' }}>⭐ uitgang</strong> is vergrendeld — activeer eerst
-        <strong style={{ color: '#22d3ee' }}> beide schakelaars (A en B)</strong> door erop te LANDEN via een spinner.
+        <strong style={{ color: '#a855f7' }}>🌀 Spinners</strong> stuwen je voort — en als je LANDT op een andere spinner,
+        neemt die het over (chain-reactie). Activeer <strong style={{ color: '#22d3ee' }}>Schakelaar A en B</strong> door erop
+        te landen via een spinner. Daarna gaat de <strong style={{ color: '#22c55e' }}>⭐ uitgang</strong> open — loop er dan naartoe
+        (pas op de <strong style={{ color: '#fdba74' }}>trap-spinner</strong> vlak bij de deur!).
       </div>
 
-      {/* Switches-status balk */}
       <div style={{
         display: 'flex', gap: 10, margin: '0 14px 10px', padding: '8px 12px',
         background: '#2d1558', borderRadius: 10, border: '1px solid #6d28d9',
@@ -342,22 +325,20 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
         </div>
       )}
 
-      {/* Grid + sprite */}
-      <div style={{ padding: '4px 12px' }}>
+      {/* Grid + sprite — flex-wrapper centreert inline-grid zodat absolute sprite correct aligneert */}
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 12px' }}>
         <div style={{
           '--cell': 'min(52px, 14vw)',
           '--gap': '4px',
-          display: 'grid',
+          display: 'inline-grid',
           gridTemplateColumns: `repeat(${SIZE}, var(--cell))`,
           gridTemplateRows: `repeat(${SIZE}, var(--cell))`,
           gap: 'var(--gap)',
-          justifyContent: 'center',
-          margin: '0 auto',
           position: 'relative',
         }}>
-          {rows}
+          {cells}
 
-          {/* Sprite overlay */}
+          {/* Sprite overlay — relatief t.o.v. grid zelf, niet de centering-wrapper */}
           <div style={{
             position: 'absolute',
             left: 0, top: 0,
@@ -388,7 +369,6 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
         </div>
       </div>
 
-      {/* Controls */}
       <div style={{
         display: 'flex', justifyContent: 'center', gap: 16, padding: 14,
         fontSize: 13, color: '#c4b5fd', alignItems: 'center',
@@ -419,7 +399,6 @@ export default function SpinnerGame({ team, onComplete, onAbort }) {
         }}>← Terug naar HQ-overzicht</button>
       </div>
 
-      {/* Spin-rotatie keyframe (één keer per mount injectie) */}
       <style>{`
         @keyframes spinRotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
