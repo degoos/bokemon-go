@@ -243,10 +243,11 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
       .then(({ data }) => { if (data) setAreas(data) })
   }, [session.id])
 
-  // Klok-ticker voor fading spawns én catching-spawns (beide hebben een aftellende klok)
+  // Klok-ticker voor fading spawns, catching-spawns én handicap-countdown
   const tickingKey = [
     ...spawns.filter(s => s.fade_duration_seconds && s.expires_at).map(s => `f${s.id}${s.expires_at}`),
     ...spawns.filter(s => s.status === 'catching' && s.catch_team1_arrived_at && !s.active_opdracht_type).map(s => `c${s.id}${s.catch_team1_arrived_at}`),
+    ...effects.filter(e => e.item_key === 'handicap' && e.is_active && e.expires_at).map(e => `h${e.id}${e.expires_at}`),
   ].join(',')
   useEffect(() => {
     if (!tickingKey) return
@@ -267,6 +268,21 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
     e.item_key === 'double_team' && e.is_active && e.target_team_id === team.id &&
     (!e.expires_at || new Date(e.expires_at) > new Date())
   ) : []
+
+  // Poké Lure actief voor mijn team — tik een verre spawn aan om te teleporteren
+  const pokeLureActive = team ? effects.some(e =>
+    e.team_id === team.id && e.item_key === 'poke_lure' && e.is_active &&
+    (!e.expires_at || new Date(e.expires_at) > new Date())
+  ) : false
+
+  // Actieve handicap voor mijn team (admin-toegewezen)
+  const activeHandicap = team ? effects.find(e =>
+    e.team_id === team.id && e.item_key === 'handicap' && e.is_active &&
+    (!e.expires_at || new Date(e.expires_at) > new Date())
+  ) : null
+  const handicapRemainSec = activeHandicap?.expires_at
+    ? Math.max(0, Math.ceil((new Date(activeHandicap.expires_at) - nowMs) / 1000))
+    : null
 
   // ── Team Rocket HQ + Mobiele Shop posities ──
   const hqLoc = session?.hq_location && session.hq_location.lat && session.hq_location.lng
@@ -312,6 +328,34 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
     if (!position) return
     const radius = spawn.catch_radius_meters || CATCH_RADIUS_METERS
     const dist = getDistanceMeters(position.lat, position.lon, +spawn.latitude, +spawn.longitude)
+
+    // Poké Lure: als het team een actief lure-effect heeft EN deze spawn staat te ver,
+    // teleporteer de spawn naar de speler-positie i.p.v. de catch-flow te starten.
+    const activeLure = team ? effects.find(e =>
+      e.team_id === team.id && e.item_key === 'poke_lure' && e.is_active &&
+      (!e.expires_at || new Date(e.expires_at) > new Date())
+    ) : null
+    if (activeLure && dist > radius && spawn.status === 'active') {
+      // Update spawn-locatie → realtime sub trekt kaart naar de nieuwe positie
+      await supabase.from('active_spawns').update({
+        latitude:  +position.lat.toFixed(7),
+        longitude: +position.lon.toFixed(7),
+      }).eq('id', spawn.id)
+      // Lure verbruiken
+      await supabase.from('active_effects').update({ is_active: false }).eq('id', activeLure.id)
+      // Notificatie naar eigen team
+      const nm = spawn.spawn_type === 'mystery' ? 'Een mysterieus Bokémon' : (spawn.pokemon_definitions?.name || 'Een Bokémon')
+      await supabase.from('notifications').insert({
+        game_session_id: session.id,
+        title: '🎣 Poké Lure geactiveerd!',
+        message: `${nm} is naar ${player.name} geteleporteerd.`,
+        type: 'success', emoji: '🎣',
+        target_team_id: team.id,
+      })
+      refetch()
+      return
+    }
+
     if (dist > radius) return
     setThrowingAt(spawn)
   }
@@ -352,6 +396,17 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
 
   // Spawns enkel tonen in verzamelfase (tijdens training/toernooi zijn er geen actieve vangsten)
   const visibleSpawns = isCollecting ? spawns : []
+
+  // ── Legendary mechanic: 100m fuzzy zone + warmer/kouder tot binnen 10m ───
+  const LEGENDARY_FUZZY_RADIUS = 100
+  const LEGENDARY_REVEAL_RADIUS = 10
+  const activeLegendary = visibleSpawns.find(s => s.spawn_type === 'legendary' && s.status === 'active')
+  const legendaryDistance = (activeLegendary && position)
+    ? getDistanceMeters(position.lat, position.lon, +activeLegendary.latitude, +activeLegendary.longitude)
+    : null
+  const inLegendaryZone = legendaryDistance != null
+    && legendaryDistance <= LEGENDARY_FUZZY_RADIUS
+    && legendaryDistance > LEGENDARY_REVEAL_RADIUS
 
   const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi','finale','hq'].includes(activeTab)
 
@@ -400,6 +455,38 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
       )}
 
       <NotificationBanner notifications={notifications} />
+
+      {/* Handicap banner — blijft zichtbaar op ALLE schermen zolang actief */}
+      {activeHandicap && (
+        <div style={{
+          position: 'absolute', top: 60, left: 8, right: 8, zIndex: 800,
+          background: 'linear-gradient(135deg, #7f1d1d, #450a0a)',
+          border: '2px solid #ef4444', borderRadius: 14,
+          padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
+          animation: 'bokePulse 2.5s ease-in-out infinite',
+        }}>
+          <span style={{ fontSize: 30, flexShrink: 0 }}>{activeHandicap.payload?.emoji || '🎭'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: '#fca5a5', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+              Handicap: {activeHandicap.payload?.name || 'Actief'}
+            </div>
+            <div style={{ fontSize: 12, color: '#fecaca', lineHeight: 1.35, marginTop: 2 }}>
+              {activeHandicap.payload?.description}
+            </div>
+          </div>
+          {handicapRemainSec !== null && (
+            <div style={{
+              flexShrink: 0, background: 'rgba(0,0,0,0.45)',
+              padding: '6px 10px', borderRadius: 8,
+              fontWeight: 800, fontSize: 13, color: '#fbbf24',
+              border: '1px solid rgba(251,191,36,0.4)',
+            }}>
+              ⏱ {handicapRemainSec >= 60 ? `${Math.ceil(handicapRemainSec/60)}m` : `${handicapRemainSec}s`}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Kaart (altijd gerenderd, verborgen tijdens overlays) */}
       <div style={{ flex: 1, display: showOverlay ? 'none' : 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -454,7 +541,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
             </Marker>
           ))}
 
-          {/* Tegenstanders (Silph Scope/Bloedmaan) — let op: decoys vervangen ECHTE positie van die speler */}
+          {/* Tegenstanders (Silph Scope/Ponyta Sky) — let op: decoys vervangen ECHTE positie van die speler */}
           {opponentsVisible && enemyPlayers.filter(p => p.latitude && p.longitude).map(p => {
             const eTeam = teams.find(t => t.id === p.team_id)
             // Heeft de tegenstander een Double Team decoy actief op MIJ gericht?
@@ -496,6 +583,19 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
             const isMystery = spawn.spawn_type === 'mystery'
             const isShiny = spawn.spawn_type === 'shiny'
             const isLegendary = spawn.spawn_type === 'legendary'
+
+            // Legendary hidden: render 100m fuzzy zone cirkel i.p.v. exacte marker.
+            // Onthult pas zodra speler binnen 10m staat OF zodra iemand hem in vangst heeft (status !== 'active').
+            if (isLegendary && spawn.status === 'active' && dist > LEGENDARY_REVEAL_RADIUS) {
+              return (
+                <Circle key={spawn.id}
+                  center={[+spawn.latitude, +spawn.longitude]}
+                  radius={LEGENDARY_FUZZY_RADIUS}
+                  pathOptions={{ color:'#fbbf24', fillColor:'#fbbf24', fillOpacity:0.14, weight:3, dashArray:'10,6' }}
+                />
+              )
+            }
+
             const displayEmoji = isMystery ? '❓' : pokemon.sprite_emoji
             const displayName = isMystery ? '??? (mysterieus)' : isShiny ? `✨ Blinkende ${pokemon.name}` : isLegendary ? `👑 ${pokemon.name}` : pokemon.name
 
@@ -572,6 +672,12 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
         {silphScopeActive && (
           <div style={{position:'absolute',top:8,left:'50%',transform:'translateX(-50%)',background:'#2d1558',border:'1px solid var(--accent)',borderRadius:10,padding:'6px 14px',fontSize:13,fontWeight:700,zIndex:500,color:'#c084fc',whiteSpace:'nowrap'}}>
             🔭 Silph Scope actief
+          </div>
+        )}
+
+        {pokeLureActive && (
+          <div style={{position:'absolute',top:silphScopeActive?40:8,left:'50%',transform:'translateX(-50%)',background:'#1a3d26',border:'1px solid #22c55e',borderRadius:10,padding:'6px 14px',fontSize:13,fontWeight:700,zIndex:500,color:'#86efac',whiteSpace:'nowrap',animation:'bokePulse 1.5s ease-in-out infinite'}}>
+            🎣 Lure ready — tik een verre spawn
           </div>
         )}
       </div>
@@ -774,10 +880,34 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
               <span style={{ fontSize: 18 }}>👑</span>
               <div>
                 <div style={{ fontWeight: 800, fontSize: 13, color: '#fbbf24' }}>Legendarische Eindfase!</div>
-                <div style={{ fontSize: 11, color: '#fde68a' }}>Pikachu is ergens op de kaart — dit zijn de laatste minuten!</div>
+                <div style={{ fontSize: 11, color: '#fde68a' }}>Pikachu is ergens in het gele gebied — kom binnen 10m om te vangen!</div>
               </div>
             </div>
           )}
+
+          {/* Warmer / kouder indicator — alleen wanneer speler binnen 100m van legendary spawn staat, nog niet binnen 10m */}
+          {inLegendaryZone && (() => {
+            const d = legendaryDistance
+            let label, emoji, bg, border, color
+            if (d <= 15)      { emoji='🥵'; label='Gloeiend heet!';     bg='rgba(127, 29, 29, 0.96)';  border='#dc2626'; color='#fecaca' }
+            else if (d <= 30) { emoji='🔥'; label='Heel warm';          bg='rgba(124, 45, 18, 0.96)';  border='#ea580c'; color='#fed7aa' }
+            else if (d <= 50) { emoji='🌤️'; label='Lauw';              bg='rgba(120, 53, 15, 0.96)';  border='#d97706'; color='#fde68a' }
+            else if (d <= 80) { emoji='❄️'; label='Koud';              bg='rgba(30, 58, 138, 0.96)';  border='#2563eb'; color='#bfdbfe' }
+            else              { emoji='🥶'; label='IJskoud';            bg='rgba(30, 41, 59, 0.96)';  border='#475569'; color='#cbd5e1' }
+            return (
+              <div style={{
+                position: 'absolute', top: 68, left: '50%', transform: 'translateX(-50%)',
+                background: bg, border: `1px solid ${border}`, borderRadius: 99,
+                padding: '6px 16px', zIndex: 600, display: 'flex', alignItems: 'center', gap: 8,
+                whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+                animation: d <= 30 ? 'bokePulse 1.2s ease-in-out infinite' : undefined,
+              }}>
+                <span style={{ fontSize: 16 }}>{emoji}</span>
+                <span style={{ fontWeight: 800, fontSize: 13, color }}>{label}</span>
+                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>· Pikachu zoeken</span>
+              </div>
+            )
+          })()}
 
           {/* Verzamelfase: subtiele pill rechtsboven (verborgen tijdens legendary) */}
           {isCollecting && !isLegendaryPhase && (

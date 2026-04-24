@@ -4,11 +4,32 @@ import { POKEMON_TYPES } from '../lib/constants'
 
 // PokedexScreen — toont individuele vangsten (niet gegroepeerd).
 // embedded=true: geen screen-wrapper of topbar (voor gebruik in AdminScreen).
-export default function PokedexScreen({ sessionId, teamId, onClose, embedded = false }) {
+// isAdmin=true + teamId + adminPokemons + adminTeams: admin-modus — toont
+// "Direct toewijzen"-formulier bovenaan en een 🗑️-knop per vangst om die
+// vangst uit de teampool te verwijderen.
+export default function PokedexScreen({
+  sessionId,
+  teamId,
+  onClose,
+  embedded = false,
+  isAdmin = false,
+  adminPokemons = [],
+  adminTeams = [],
+}) {
   const [pokemons, setPokemons] = useState([])
   const [catches, setCatches]   = useState([])
   const [loading, setLoading]   = useState(true)
   const [filter, setFilter]     = useState('all')
+
+  // Admin: direct-toewijzen-form state
+  const [assignForm, setAssignForm] = useState({ pokemonId: '', xp: '' })
+  const [assigning, setAssigning] = useState(false)
+  const [assignSuccess, setAssignSuccess] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
+  const [showAssign, setShowAssign] = useState(false)
+
+  const adminMode = isAdmin && !!teamId
+  const currentTeam = adminMode ? adminTeams.find(t => t.id === teamId) : null
 
   useEffect(() => {
     if (!sessionId) return
@@ -36,13 +57,67 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
 
     const ch = supabase.channel(`pokedex-${sessionId}-${teamId}`)
       .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'catches',
+        event: '*', schema: 'public', table: 'catches',
         filter: `game_session_id=eq.${sessionId}`,
       }, () => load())
       .subscribe()
 
     return () => supabase.removeChannel(ch)
   }, [sessionId, teamId])
+
+  // ── Admin: direct-toewijzen ────────────────────────────────────
+  async function handleDirectAssign() {
+    if (!adminMode || !currentTeam) return
+    const pokemon = adminPokemons.find(p => p.id === assignForm.pokemonId)
+    if (!pokemon) return
+    const xp = parseInt(assignForm.xp, 10)
+    if (!xp || xp < 1) return
+    setAssigning(true)
+    const chain = pokemon.evolution_chain || [pokemon.name]
+    const { error } = await supabase.from('catches').insert({
+      game_session_id: sessionId,
+      team_id: currentTeam.id,
+      pokemon_definition_id: pokemon.id,
+      cp: xp,
+      evolution_stage: 0,
+      is_shiny: false,
+      caught_at: new Date().toISOString(),
+    })
+    if (!error) {
+      await supabase.from('notifications').insert({
+        game_session_id: sessionId,
+        title: `🎁 ${pokemon.sprite_emoji || '🐾'} ${chain[0]} toegevoegd!`,
+        message: `Team Rocket heeft ${chain[0]} (${xp} XP) direct toegewezen aan ${currentTeam.name}.`,
+        type: 'success', emoji: '🎁',
+      })
+      setAssignForm({ pokemonId: '', xp: '' })
+      setAssignSuccess(true)
+      setTimeout(() => setAssignSuccess(false), 3000)
+      setShowAssign(false)
+    }
+    setAssigning(false)
+  }
+
+  // ── Admin: catch verwijderen ───────────────────────────────────
+  async function handleDeleteCatch(c) {
+    if (!adminMode) return
+    const def = c.pokemon_definitions
+    const naam = def?.name || 'deze Bokémon'
+    const confirmMsg = `⚠️ ${naam} (${c.cp} XP) verwijderen uit de pool van ${currentTeam?.name}?\n\nDit kan niet ongedaan worden.`
+    if (!window.confirm(confirmMsg)) return
+    setDeletingId(c.id)
+    const { error } = await supabase.from('catches').delete().eq('id', c.id)
+    if (!error) {
+      // Notificatie naar team
+      await supabase.from('notifications').insert({
+        game_session_id: sessionId,
+        title: `🗑️ ${def?.sprite_emoji || '🐾'} ${naam} verwijderd`,
+        message: `Team Rocket heeft ${naam} (${c.cp} XP) uit ${currentTeam?.name} verwijderd.`,
+        type: 'warning', emoji: '🗑️',
+      })
+    }
+    setDeletingId(null)
+  }
 
   // ── Sets & filters ─────────────────────────────────────────────
   const caughtDefIds = new Set(
@@ -88,6 +163,109 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
       : <div className="screen">{loadingView}</div>
   }
 
+  // ── Admin: Direct toewijzen-card (alleen in admin-modus) ──────
+  const selectedPokemon = adminPokemons.find(p => p.id === assignForm.pokemonId)
+  const assignCard = adminMode && (
+    <div className="card" style={{
+      border: `1px solid ${currentTeam?.color || '#7c3aed'}44`,
+      background: 'rgba(124,58,237,0.04)',
+    }}>
+      <div
+        onClick={() => setShowAssign(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+          marginBottom: showAssign ? 12 : 0,
+        }}
+      >
+        <div style={{ fontSize: 22 }}>🎁</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Direct toewijzen</div>
+          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+            Voeg Bokémon toe aan {currentTeam?.emoji} {currentTeam?.name} zonder opdracht
+          </div>
+        </div>
+        <div style={{ fontSize: 18, color: 'var(--text2)' }}>
+          {showAssign ? '▲' : '▼'}
+        </div>
+      </div>
+
+      {showAssign && (
+        <>
+          {assignSuccess && (
+            <div style={{
+              background: '#14532d', border: '1px solid #22c55e', borderRadius: 8,
+              padding: '8px 12px', marginBottom: 12, color: '#86efac',
+              fontWeight: 700, fontSize: 12,
+            }}>
+              ✅ Bokémon succesvol toegewezen!
+            </div>
+          )}
+
+          <label style={pdxLabelStyle}>🐾 Bokémon</label>
+          <select
+            style={pdxSelectStyle}
+            value={assignForm.pokemonId}
+            onChange={e => setAssignForm(f => ({ ...f, pokemonId: e.target.value, xp: '' }))}
+          >
+            <option value="">— kies Bokémon —</option>
+            {adminPokemons.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} XP)
+              </option>
+            ))}
+          </select>
+
+          {assignForm.pokemonId && selectedPokemon && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label style={pdxLabelStyle}>⚡ XP waarde</label>
+                <input
+                  type="number"
+                  min={selectedPokemon.cp_min || 1}
+                  max={selectedPokemon.cp_max || 9999}
+                  placeholder={`${selectedPokemon.cp_min}–${selectedPokemon.cp_max}`}
+                  value={assignForm.xp}
+                  onChange={e => setAssignForm(f => ({ ...f, xp: e.target.value }))}
+                  style={pdxInputStyle}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 4, alignSelf: 'flex-end', marginBottom: 1 }}>
+                <button
+                  onClick={() => setAssignForm(f => ({ ...f, xp: String(selectedPokemon.cp_min || '') }))}
+                  style={{ ...pdxSmallBtn, background: '#1e3a5f' }}
+                >Min</button>
+                <button
+                  onClick={() => setAssignForm(f => ({
+                    ...f,
+                    xp: String(Math.round(((selectedPokemon.cp_min || 0) + (selectedPokemon.cp_max || 0)) / 2)),
+                  }))}
+                  style={{ ...pdxSmallBtn, background: '#1e3a5f' }}
+                >Mid</button>
+                <button
+                  onClick={() => setAssignForm(f => ({ ...f, xp: String(selectedPokemon.cp_max || '') }))}
+                  style={{ ...pdxSmallBtn, background: '#1e3a5f' }}
+                >Max</button>
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={handleDirectAssign}
+            disabled={assigning || !assignForm.pokemonId || !assignForm.xp}
+            style={{
+              width: '100%', padding: '12px 0', borderRadius: 10, cursor: 'pointer',
+              background: assigning ? '#374151' : (currentTeam?.color || '#7c3aed'),
+              color: '#fff', fontWeight: 800, fontSize: 14, border: 'none',
+              opacity: (!assignForm.pokemonId || !assignForm.xp) ? 0.5 : 1,
+            }}
+          >
+            {assigning ? 'Bezig…' : `🎁 Toewijzen aan ${currentTeam?.name}`}
+          </button>
+        </>
+      )}
+    </div>
+  )
+
   // ── Content ────────────────────────────────────────────────────
   const inner = (
     <>
@@ -98,6 +276,30 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
           <h3 style={{ color: 'var(--text)' }}>📖 Pokédex</h3>
           <div style={{ color: 'var(--text2)', fontSize: 12, fontWeight: 700 }}>
             {caughtDefCount}/{totalDefs}
+          </div>
+        </div>
+      )}
+
+      {/* Admin topbar in embedded modus — toon team + terug-knop */}
+      {embedded && adminMode && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0,
+          background: `linear-gradient(90deg, ${currentTeam?.color || '#7c3aed'}22 0%, transparent 100%)`,
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'var(--bg3)', border: '1px solid var(--border)',
+              borderRadius: 8, padding: '6px 10px', color: 'var(--text2)',
+              fontSize: 13, cursor: 'pointer', fontWeight: 600,
+            }}
+          >← Terug</button>
+          <div style={{ flex: 1, fontWeight: 800, fontSize: 15, color: currentTeam?.color || 'var(--text)' }}>
+            {currentTeam?.emoji} {currentTeam?.name}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 700 }}>
+            {totalCaught} gevangen
           </div>
         </div>
       )}
@@ -123,6 +325,9 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
       </div>
 
       <div className="scroll-area">
+        {/* Admin: direct-toewijzen card (bovenaan) */}
+        {adminMode && assignCard}
+
         {/* Samenvatting (enkel bij filter=alles en minstens één vangst) */}
         {totalCaught > 0 && filter === 'all' && (
           <div className="card" style={{ background: 'var(--bg3)' }}>
@@ -169,6 +374,7 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
               const typeInfo = POKEMON_TYPES[def.pokemon_type] || {}
               const isShiny  = c.is_shiny
               const chain    = Array.isArray(def.evolution_chain) ? def.evolution_chain : []
+              const isDeleting = deletingId === c.id
 
               return (
                 <div key={c.id || idx} className="card" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -210,7 +416,24 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
                     )}
                   </div>
 
-                  <div style={{ color: 'var(--success)', fontSize: 22, flexShrink: 0 }}>✅</div>
+                  {adminMode ? (
+                    <button
+                      onClick={() => handleDeleteCatch(c)}
+                      disabled={isDeleting}
+                      title="Verwijder deze vangst"
+                      style={{
+                        flexShrink: 0, background: isDeleting ? '#374151' : 'rgba(239,68,68,0.12)',
+                        border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8,
+                        padding: '8px 10px', cursor: isDeleting ? 'default' : 'pointer',
+                        color: '#ef4444', fontSize: 16, fontWeight: 700,
+                        opacity: isDeleting ? 0.5 : 1,
+                      }}
+                    >
+                      {isDeleting ? '⏳' : '🗑️'}
+                    </button>
+                  ) : (
+                    <div style={{ color: 'var(--success)', fontSize: 22, flexShrink: 0 }}>✅</div>
+                  )}
                 </div>
               )
             })}
@@ -262,4 +485,24 @@ export default function PokedexScreen({ sessionId, teamId, onClose, embedded = f
       {inner}
     </div>
   )
+}
+
+// ── Stijlconstanten voor admin direct-toewijzen-form ──
+const pdxLabelStyle = {
+  display: 'block', fontSize: 11, color: 'var(--text2)',
+  fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em',
+}
+const pdxSelectStyle = {
+  width: '100%', background: 'var(--bg3)', color: 'var(--text1)',
+  border: '1px solid var(--border)', borderRadius: 8,
+  padding: '10px 12px', fontSize: 14, marginBottom: 12,
+}
+const pdxInputStyle = {
+  width: '100%', background: 'var(--bg3)', color: 'var(--text1)',
+  border: '1px solid var(--border)', borderRadius: 8,
+  padding: '10px 12px', fontSize: 14,
+}
+const pdxSmallBtn = {
+  padding: '8px 10px', border: 'none', borderRadius: 6,
+  color: '#93c5fd', fontWeight: 700, fontSize: 12, cursor: 'pointer',
 }

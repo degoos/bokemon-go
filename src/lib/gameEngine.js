@@ -132,6 +132,7 @@ export async function startLegendaryPhase(sessionId) {
   const cp = Math.floor(pikachu.cp_min + Math.random() * (pikachu.cp_max - pikachu.cp_min))
 
   // 4. Spawn Pikachu als legendary
+  //    catch_radius_meters: 10 — legendary vereist dat speler fysiek dichtbij komt (fuzzy zone mechanic)
   const { data: spawn } = await supabase.from('active_spawns').insert({
     game_session_id: sessionId,
     pokemon_definition_id: pikachu.id,
@@ -140,7 +141,7 @@ export async function startLegendaryPhase(sessionId) {
     spawn_type: 'legendary',
     cp,
     requires_opdracht: true,
-    catch_radius_meters: 50,
+    catch_radius_meters: 10,
     status: 'active',
     expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 60 min (eindigt met fase)
   }).select().single()
@@ -149,7 +150,7 @@ export async function startLegendaryPhase(sessionId) {
   await supabase.from('notifications').insert({
     game_session_id: sessionId,
     title: '👑 De Legendarische Eindfase is begonnen!',
-    message: '⚡ Pikachu is gespot in het gebied — en dit zijn de laatste minuten van de verzamelfase!',
+    message: '⚡ Pikachu is ergens op de kaart gespot — volg het gele cirkelgebied en laat de warmer/kouder-indicator je gidsen. Je moet binnen 10 meter komen om hem te vangen!',
     type: 'warning',
     emoji: '⚡',
   })

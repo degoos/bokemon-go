@@ -11,6 +11,7 @@ import { autoSpawnPokemon, startLegendaryPhase, buildSpawnNotification } from '.
 import NotificationBanner from '../../components/NotificationBanner'
 import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
+import HandicapPicker from '../../components/HandicapPicker'
 import PokedexScreen from '../PokedexScreen'
 import TournamentScreen from '../TournamentScreen'
 import FinaleScreen from '../FinaleScreen'
@@ -88,7 +89,7 @@ function MapAutoCenter({ areas, position }) {
 }
 
 export default function AdminScreen({ player, session: initialSession, onSignOut }) {
-  const { session, teams, players, spawns, events, notifications, refetch } = useGameSession(initialSession.id)
+  const { session, teams, players, spawns, events, effects, notifications, refetch } = useGameSession(initialSession.id)
   const { position } = usePlayerLocation(player.id, initialSession.id)
   const [tab, setTab] = useState('dashboard')
   const [mapMode, setMapMode] = useState('view') // view | spawn | boundary | biome
@@ -115,10 +116,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   // Evolutieverzoeken van trainers
   const [evoRequests, setEvoRequests] = useState([])
   const [resolvingEvo, setResolvingEvo] = useState(null) // id van request dat verwerkt wordt
-  // Direct toewijzen Bokémon aan team (correctie/noodtoewijzing)
-  const [assignForm, setAssignForm] = useState({ pokemonId: '', teamId: '', xp: '' })
-  const [assigning, setAssigning] = useState(false)
-  const [assignSuccess, setAssignSuccess] = useState(false)
+  // NB: Direct toewijzen is verplaatst naar de gedetailleerde Pokédex per team (PokedexScreen)
 
   // ── Eigen catches-state voor dashboard (onafhankelijk van useGameSession) ──
   // useGameSession.catches is mogelijk stale als de catches-tabel niet in
@@ -446,6 +444,17 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   }
 
   async function triggerEvent(key) {
+    // Shuffle: extra confirmatie (onomkeerbaar — herverdeelt alle catches)
+    if (key === 'shuffle') {
+      const ok = window.confirm(
+        '🔀 Shuffle zal ALLE gevangen Bokémon random herverdelen tussen beide teams.\n\n' +
+        'Dit is onomkeerbaar. Doorgaan?'
+      )
+      if (!ok) return
+      await runShuffle()
+      return // runShuffle logt zelf events_log + notificatie
+    }
+
     await supabase.from('events_log').insert({
       game_session_id: initialSession.id,
       event_key: key,
@@ -454,13 +463,76 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
       started_at: new Date().toISOString(),
     })
     // Verstuur notificatie
-    const eventNames = { blood_moon: 'Bloedmaan 🌕', shuffle: 'Shuffle 🔀', mirror_world: 'Mirror World 🪞', legendary: 'Legendary Spawn 👑', shiny_hunt: 'Shiny Hunt ✨' }
+    const eventNames = {
+      blood_moon:  'Ponyta Sky 🔥',
+      shuffle:     'Shuffle 🔀',
+      legendary:   'Legendary Spawn 👑',
+      shiny_hunt:  'Shiny Hunt ✨',
+    }
+    const eventMessages = {
+      blood_moon: 'A wild Ponyta appeared and lit the sky! Iedereen is zichtbaar voor iedereen (3 min).',
+      legendary:  'Een Legendary Bokémon is verschenen — de verzamelfase loopt af!',
+      shiny_hunt: 'Een zeldzame Shiny Bokémon is gespot — zoek snel!',
+    }
     await supabase.from('notifications').insert({
       game_session_id: initialSession.id,
       title: `⚡ Event: ${eventNames[key] || key}`,
-      message: 'Team Rocket heeft een event getriggerd!',
+      message: eventMessages[key] || 'Team Rocket heeft een event getriggerd!',
       type: 'event', emoji: '⚡',
     })
+  }
+
+  // ── Shuffle: herverdeel alle catches random tussen teams ────────
+  async function runShuffle() {
+    if (!teams || teams.length < 2) return
+    // Verse fetch om zeker te zijn dat we alle recente catches meenemen
+    const { data: allCatches } = await supabase.from('catches')
+      .select('id, team_id')
+      .eq('game_session_id', initialSession.id)
+
+    if (!allCatches || allCatches.length === 0) {
+      await supabase.from('notifications').insert({
+        game_session_id: initialSession.id,
+        title: '🔀 Shuffle mislukt',
+        message: 'Geen Bokémon om te shufflen.',
+        type: 'warning', emoji: '🔀',
+      })
+      return
+    }
+
+    // Random herverdeling: per catch 50/50 welk team
+    const teamIds = teams.map(t => t.id)
+    const updates = allCatches.map(c => ({
+      id: c.id,
+      new_team: teamIds[Math.floor(Math.random() * teamIds.length)],
+    }))
+
+    // Batch-update — geen upsert (zou created_at verkrachten), per-rij update
+    for (const u of updates) {
+      if (u.new_team !== allCatches.find(c => c.id === u.id)?.team_id) {
+        await supabase.from('catches').update({ team_id: u.new_team }).eq('id', u.id)
+      }
+    }
+
+    // Log in events_log
+    await supabase.from('events_log').insert({
+      game_session_id: initialSession.id,
+      event_key: 'shuffle',
+      triggered_by: 'admin',
+      status: 'active',
+      started_at: new Date().toISOString(),
+      data: { shuffled_count: allCatches.length },
+    })
+
+    // Notificatie voor ALLE spelers (geen target_team_id)
+    await supabase.from('notifications').insert({
+      game_session_id: initialSession.id,
+      title: '🔀 SHUFFLE!',
+      message: `${allCatches.length} Bokémon zijn random herverdeeld. Check je inventaris!`,
+      type: 'event', emoji: '🔀',
+    })
+
+    refetch()
   }
 
   async function toggleShop() {
@@ -509,39 +581,6 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     await supabase.from('game_sessions')
       .update({ hq_location: loc })
       .eq('id', initialSession.id)
-  }
-
-  // ── Direct toewijzen: Bokémon zonder opdracht aan team geven ──
-  async function handleDirectAssign() {
-    const pokemon = pokemons.find(p => p.id === assignForm.pokemonId)
-    const targetTeam = teams.find(t => t.id === assignForm.teamId)
-    if (!pokemon || !targetTeam) return
-    const xp = parseInt(assignForm.xp, 10)
-    if (!xp || xp < 1) return
-    setAssigning(true)
-    const chain = pokemon.evolution_chain || [pokemon.name]
-    const { error } = await supabase.from('catches').insert({
-      game_session_id: initialSession.id,
-      team_id: targetTeam.id,
-      pokemon_definition_id: pokemon.id,
-      cp: xp,
-      evolution_stage: 0,
-      is_shiny: false,
-      caught_at: new Date().toISOString(),
-    })
-    if (!error) {
-      // Notificatie naar team
-      await supabase.from('notifications').insert({
-        game_session_id: initialSession.id,
-        title: `🎁 ${pokemon.sprite_emoji || '🐾'} ${chain[0]} toegevoegd!`,
-        message: `Team Rocket heeft ${chain[0]} (${xp} XP) direct toegewezen aan ${targetTeam.name}.`,
-        type: 'success', emoji: '🎁',
-      })
-      setAssignForm({ pokemonId: '', teamId: '', xp: '' })
-      setAssignSuccess(true)
-      setTimeout(() => setAssignSuccess(false), 3000)
-    }
-    setAssigning(false)
   }
 
   const teamScores = teams.map(t => {
@@ -679,14 +718,29 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                   const bucket = teamPokedex[t.id] || {}
                   const entries = Object.values(bucket).sort((a, b) => b.count - a.count || b.topXP - a.topXP)
                   const totalCount = entries.reduce((s, e) => s + e.count, 0)
+                  const openDetail = () => { setPokedexView(t.id); setTab('pokedex') }
                   return (
-                    <div key={t.id} style={{
-                      borderLeft: `3px solid ${t.color}`, paddingLeft: 10,
-                    }}>
+                    <div
+                      key={t.id}
+                      onClick={openDetail}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') openDetail() }}
+                      style={{
+                        borderLeft: `3px solid ${t.color}`, paddingLeft: 10,
+                        cursor: 'pointer', borderRadius: 6,
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
                         <div style={{ fontWeight: 800, fontSize: 14 }}>{t.emoji} {t.name}</div>
                         <div style={{ fontSize: 11, color: 'var(--text2)' }}>
                           {entries.length} soorten · {totalCount} gevangen
+                        </div>
+                        <div style={{ marginLeft: 'auto', fontSize: 11, color: t.color, fontWeight: 700 }}>
+                          Beheer →
                         </div>
                       </div>
                       {entries.length === 0 ? (
@@ -1060,109 +1114,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             </button>
           </div>
 
-          {/* ── Direct toewijzen (correctie/noodtoewijzing) ── */}
-          <div className="card" style={{ border: '1px solid #7c3aed44' }}>
-            <h3 style={{ marginBottom: 4 }}>🎁 Direct toewijzen</h3>
-            <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 14 }}>
-              Wijs een Bokémon rechtstreeks toe aan een team — zonder opdracht. Gebruik als correctie of bij een bug in het spel.
-            </p>
-
-            {assignSuccess && (
-              <div style={{
-                background: '#14532d', border: '1px solid #22c55e', borderRadius: 8,
-                padding: '10px 14px', marginBottom: 12, color: '#86efac',
-                fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8,
-              }}>
-                ✅ Bokémon succesvol toegewezen!
-              </div>
-            )}
-
-            {/* Pokémon kiezen */}
-            <label style={adminLabelStyle}>🐾 Bokémon</label>
-            <select
-              style={adminSelectStyle}
-              value={assignForm.pokemonId}
-              onChange={e => setAssignForm(f => ({ ...f, pokemonId: e.target.value, xp: '' }))}
-            >
-              <option value="">— kies Bokémon —</option>
-              {pokemons.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.sprite_emoji} {p.name} ({p.cp_min}–{p.cp_max} XP)
-                </option>
-              ))}
-            </select>
-
-            {/* XP instellen */}
-            {assignForm.pokemonId && (() => {
-              const pm = pokemons.find(p => p.id === assignForm.pokemonId)
-              return (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={adminLabelStyle}>⚡ XP waarde</label>
-                    <input
-                      type="number"
-                      min={pm?.cp_min || 1}
-                      max={pm?.cp_max || 9999}
-                      placeholder={`${pm?.cp_min}–${pm?.cp_max}`}
-                      value={assignForm.xp}
-                      onChange={e => setAssignForm(f => ({ ...f, xp: e.target.value }))}
-                      style={adminInputStyle}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', gap: 4, alignSelf: 'flex-end', marginBottom: 1 }}>
-                    <button
-                      onClick={() => setAssignForm(f => ({ ...f, xp: String(pm?.cp_min || '') }))}
-                      style={{ ...adminSmallBtn, background: '#1e3a5f' }}
-                    >Min</button>
-                    <button
-                      onClick={() => setAssignForm(f => ({
-                        ...f,
-                        xp: String(Math.round(((pm?.cp_min || 0) + (pm?.cp_max || 0)) / 2)),
-                      }))}
-                      style={{ ...adminSmallBtn, background: '#1e3a5f' }}
-                    >Mid</button>
-                    <button
-                      onClick={() => setAssignForm(f => ({ ...f, xp: String(pm?.cp_max || '') }))}
-                      style={{ ...adminSmallBtn, background: '#1e3a5f' }}
-                    >Max</button>
-                  </div>
-                </div>
-              )
-            })()}
-
-            {/* Team kiezen */}
-            <label style={adminLabelStyle}>🏳️ Team</label>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              {teams.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setAssignForm(f => ({ ...f, teamId: t.id }))}
-                  style={{
-                    flex: 1, padding: '10px 0', borderRadius: 10, cursor: 'pointer',
-                    border: assignForm.teamId === t.id ? `2px solid ${t.color}` : '2px solid var(--border)',
-                    background: assignForm.teamId === t.id ? t.color + '33' : 'var(--bg3)',
-                    color: t.color, fontWeight: 800, fontSize: 13,
-                  }}
-                >
-                  {t.emoji} {t.name}
-                </button>
-              ))}
-            </div>
-
-            {/* Bevestig */}
-            <button
-              onClick={handleDirectAssign}
-              disabled={assigning || !assignForm.pokemonId || !assignForm.teamId || !assignForm.xp}
-              style={{
-                width: '100%', padding: '13px 0', borderRadius: 10, cursor: 'pointer',
-                background: assigning ? '#374151' : '#7c3aed',
-                color: '#fff', fontWeight: 800, fontSize: 14, border: 'none',
-                opacity: (!assignForm.pokemonId || !assignForm.teamId || !assignForm.xp) ? 0.5 : 1,
-              }}
-            >
-              {assigning ? 'Bezig…' : '🎁 Toewijzen aan team'}
-            </button>
-          </div>
+          {/* Direct toewijzen is verplaatst naar de gedetailleerde Pokédex per team (📖) */}
         </div>
       )}
 
@@ -1538,9 +1490,8 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
           {/* Handmatige event triggers */}
           <h3 style={{ marginBottom: 12, marginTop: pendingEvents.length ? 20 : 0 }}>🎮 Manueel Triggeren</h3>
           {[
-            { key: 'blood_moon', name: 'Bloedmaan', emoji: '🌕', desc: 'Iedereen zichtbaar voor iedereen (3 min)' },
-            { key: 'shuffle', name: 'Shuffle', emoji: '🔀', desc: 'Bokémon worden random herverdeeld' },
-            { key: 'mirror_world', name: 'Mirror World', emoji: '🪞', desc: 'Teamkleuren omgewisseld op kaart (5 min)' },
+            { key: 'blood_moon', name: 'Ponyta Sky', emoji: '🔥', desc: 'A wild Ponyta appeared and lit the sky — iedereen zichtbaar voor iedereen (3 min)' },
+            { key: 'shuffle', name: 'Shuffle', emoji: '🔀', desc: 'Alle Bokémon worden random herverdeeld tussen teams — onomkeerbaar!' },
             { key: 'shiny_hunt', name: 'Shiny Hunt', emoji: '✨', desc: 'Zeldzame Shiny Bokémon appeared' },
             { key: 'legendary', name: 'Legendary Spawn', emoji: '👑', desc: 'Sterkste Bokémon appeared → eindesignaal' },
           ].map(ev => (
@@ -1647,6 +1598,9 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               teamId={pokedexView}
               embedded={true}
               onClose={() => setPokedexView('both')}
+              isAdmin={true}
+              adminPokemons={pokemons}
+              adminTeams={teams}
             />
           )}
         </div>
@@ -1817,27 +1771,13 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             </button>
           </div>
 
-          {/* Straf uitdelen */}
+          {/* Handicap uitdelen — geselecteerd uit handicap_definitions */}
           <div className="card">
-            <h3 style={{ marginBottom: 12 }}>🎭 Straf Uitdelen</h3>
-            {teams.map(t => (
-              <button key={t.id} className="btn btn-danger btn-sm" style={{ marginBottom: 8 }}
-                onClick={async () => {
-                  const straf = prompt(`Straf voor ${t.name}:`)
-                  if (straf) {
-                    await supabase.from('notifications').insert({
-                      game_session_id: initialSession.id,
-                      title: `🎭 Straf voor ${t.emoji} ${t.name}!`,
-                      message: straf,
-                      type: 'danger', emoji: '🎭',
-                      target_team_id: t.id,
-                    })
-                  }
-                }}
-              >
-                🎭 Straf aan {t.emoji} {t.name}
-              </button>
-            ))}
+            <h3 style={{ marginBottom: 4 }}>🎭 Handicap Uitdelen</h3>
+            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
+              Kies een handicap en het team dat 'm krijgt. Team ontvangt direct een melding.
+            </div>
+            <HandicapPicker sessionId={initialSession.id} teams={teams} effects={effects} />
           </div>
 
           {/* Biome-zones beheer */}
