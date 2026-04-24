@@ -26,7 +26,7 @@ const ITEM_INFO = {
   mirror_coat: { emoji: '🪞', name: 'Mirror Coat' },
   pickup:      { emoji: '🎲', name: 'Pickup' },
   poke_lure:   { emoji: '🎣', name: 'Poké Lure' },
-  pokemon_egg: { emoji: '🥚', name: 'Pokémon Egg' },
+  pokemon_egg: { emoji: '🥚', name: 'Bokémon Egg' },
   master_ball: { emoji: '🏆', name: 'Master Ball' },
 }
 

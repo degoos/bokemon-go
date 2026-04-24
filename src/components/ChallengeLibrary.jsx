@@ -37,7 +37,7 @@ export const ITEM_REWARDS = [
   { key: 'pickup',      label: '🎲 Pickup (3 random)' },
   { key: 'poke_lure',   label: '🎣 Poké Lure' },
   { key: 'moon_stone',  label: '🌙 Moon Stone' },
-  { key: 'pokemon_egg', label: '🥚 Pokémon Egg' },
+  { key: 'pokemon_egg', label: '🥚 Bokémon Egg' },
 ]
 
 function typeLabel(t) {

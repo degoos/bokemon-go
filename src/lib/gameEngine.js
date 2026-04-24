@@ -197,7 +197,7 @@ export async function autoSpawnPokemon(sessionId, isLegendaryPhase = false) {
     if (pointInPolygon(lat, lon, biomeCoords)) { detectedBiomeType = biome.pokemon_type; break }
   }
 
-  // Haal alle Pokémon op
+  // Haal alle Bokémon op
   const { data: pokemons } = await supabase
     .from('pokemon_definitions')
     .select('*')
@@ -206,7 +206,7 @@ export async function autoSpawnPokemon(sessionId, isLegendaryPhase = false) {
 
   if (!pokemons || pokemons.length === 0) return null
 
-  // Kies Pokémon: altijd het type van de biome waarin het punt valt.
+  // Kies Bokémon: altijd het type van de biome waarin het punt valt.
   // Alleen als het punt buiten alle biome-zones valt (of geen biomes ingesteld),
   // kies dan volledig random.
   let pokemon

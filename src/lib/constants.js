@@ -75,7 +75,7 @@ export const TOURNAMENT_GYMS = [
       'You throw. The ball must land inside the cup. Your opponent drinks the cup and removes it.',
       'Empty all six cups of your opponent — and you win!',
       'Three levels of heat await. Level one: four cups. Level two: six cups. Level three: six cups with more beer.',
-      'Your Bokémon fuels your advantage. A stronger Pokémon removes cups before the battle begins.',
+      'Your Bokémon fuels your advantage. A stronger Bokémon removes cups before the battle begins.',
       'The losing type fires with one hand tied behind its back.',
       'Three levels. All at once — no time to think! Play with fire and you\'re gonna get burned!',
     ],
@@ -166,7 +166,7 @@ export const TOURNAMENT_GYMS = [
     typeIsBonus: true,          // ← geen straf voor verliezer, bonus voor winnaar
     intro: [
       'I had a vision of your arrival, trainer.',
-      'I am Sabrina. Leader of Saffron Gym. My Pokémon have formidable mental power.',
+      'I am Sabrina. Leader of Saffron Gym. My Bokémon have formidable mental power.',
       'Four horses. Four symbols: ♠ ♥ ♦ ♣. You choose two. Your opponent chooses two.',
       'Cards are turned one by one. The horse matching the symbol takes one step forward.',
       'First horse to cross the finish: its owner wins that race. Best of three races.',

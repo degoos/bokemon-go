@@ -991,7 +991,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                       background: 'var(--bg3)', borderRadius: 10, padding: 12,
                       marginBottom: 10, border: '1px solid var(--warning)',
                     }}>
-                      {/* Team + Pokémon */}
+                      {/* Team + Bokémon */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                         <div style={{ fontSize: 36 }}>{def?.sprite_emoji || '❓'}</div>
                         <div style={{ flex: 1 }}>
@@ -1531,7 +1531,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             ))}
           </div>
 
-          {/* Beide-teams view: alle gevangen pokémon met team-tags */}
+          {/* Beide-teams view: alle gevangen bokémon met team-tags */}
           {pokedexView === 'both' && (() => {
             // Bouw een map: pokemon_definition_id → { def, perTeam: { teamId: count } }
             const pokedexMap = {}

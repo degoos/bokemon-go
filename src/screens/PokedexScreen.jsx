@@ -358,7 +358,7 @@ export default function PokedexScreen({
         {/* Lege staat */}
         {caughtEntries.length === 0 && uncaughtDefs.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--text2)' }}>
-            Geen Pokémon gevonden
+            Geen Bokémon gevonden
           </div>
         )}
 

@@ -780,7 +780,7 @@ function ItemFlowBody({
       {flow.mode === 'confirm_lure' && (
         <>
           <p style={{ fontSize: 14, color: 'var(--text)', marginBottom: 16, lineHeight: 1.5 }}>
-            Lure activeren? Je hebt daarna <strong>3 minuten</strong> om op een Pokémon-spawn op de kaart te tikken — die wordt naar jouw locatie geteleporteerd.
+            Lure activeren? Je hebt daarna <strong>3 minuten</strong> om op een Bokémon-spawn op de kaart te tikken — die wordt naar jouw locatie geteleporteerd.
           </p>
           <button className="btn btn-success" disabled={!!submitting} onClick={onLure}>
             🎣 Activeer Poké Lure

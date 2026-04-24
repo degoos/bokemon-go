@@ -83,7 +83,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
   }, [team?.id, spawn?.id])
 
   // ── Win-animatie fases (timer zit hier, niet in PokeballThrow) ──
-  // Fase 1 'throw': pokébal vliegt naar Pokémon (1.3s)
+  // Fase 1 'throw': pokébal vliegt naar Bokémon (1.3s)
   useEffect(() => {
     if (result !== 'won' || winPhase !== 'throw') return
     const t = setTimeout(() => setWinPhase('shake'), 1300)
@@ -334,7 +334,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
         <div />
       </div>
 
-      {/* Pokémon info */}
+      {/* Bokémon info */}
       <div className="catch-pokemon-card">
         <div className="emoji" style={{ filter: spawn.spawn_type === 'shiny' ? 'drop-shadow(0 0 12px gold)' : 'none' }}>
           {spawn.spawn_type === 'mystery' ? '❓' : pokemon.sprite_emoji}
@@ -463,7 +463,7 @@ export default function CatchFlow({ spawn, player, team, teams = [], session, on
         {phase === 'result' && (
           <div style={{ textAlign: 'center', padding: 24 }}>
             {result === 'won' && winPhase === 'throw' ? (
-              /* Fase 1: pokébal vliegt naar Pokémon (fullscreen overlay) */
+              /* Fase 1: pokébal vliegt naar Bokémon (fullscreen overlay) */
               <PokeballThrow
                 emoji={spawn.spawn_type === 'mystery' ? '❓'
                      : spawn.spawn_type === 'legendary' ? '👑'

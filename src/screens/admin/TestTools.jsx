@@ -127,14 +127,14 @@ export default function TestTools({ session, sessionId, teams, pokemons, catches
     }
   }
 
-  // Filter: enkel reguliere Pokémon (geen special spawns zoals Pikachu/Mewtwo)
+  // Filter: enkel reguliere Bokémon (geen special spawns zoals Pikachu/Mewtwo)
   function regularPokemons() {
     return pokemons.filter(p => !p.is_special_spawn)
   }
 
   async function seedRandomPerTeam(count) {
     const reg = regularPokemons()
-    if (reg.length === 0 || teams.length === 0) throw new Error('Geen teams of Pokémon beschikbaar')
+    if (reg.length === 0 || teams.length === 0) throw new Error('Geen teams of Bokémon beschikbaar')
     const rows = []
     for (const t of teams) {
       for (let i = 0; i < count; i++) {
@@ -180,7 +180,7 @@ export default function TestTools({ session, sessionId, teams, pokemons, catches
     const reg = regularPokemons()
     const rows = []
     for (const t of teams) {
-      // 10 Pokémon, helft stage 1, een paar stage 2, mix van types
+      // 10 Bokémon, helft stage 1, een paar stage 2, mix van types
       for (let i = 0; i < 10; i++) {
         const p = pick(reg)
         const chainLen = Array.isArray(p.evolution_chain) ? p.evolution_chain.length : 1
@@ -201,7 +201,7 @@ export default function TestTools({ session, sessionId, teams, pokemons, catches
   }
 
   async function seedFinaleReady() {
-    // Elk team krijgt een sterk team + een speciaal Pokémon (Pikachu/Mewtwo)
+    // Elk team krijgt een sterk team + een speciaal Bokémon (Pikachu/Mewtwo)
     // Team 1 (eerste) krijgt Pikachu, Team 2 krijgt Mewtwo
     const pikachu = pokemons.find(p => p.name?.toLowerCase() === 'pikachu' || p.is_special_spawn && p.pokemon_type === 'electric')
     const mewtwo  = pokemons.find(p => p.name?.toLowerCase().includes('mew') && p.is_special_spawn)
@@ -385,13 +385,13 @@ export default function TestTools({ session, sessionId, teams, pokemons, catches
         />
         <SeedBtn
           emoji="📖" label="Volledige Pokédex × 2 stages"
-          subtitle="Alle reguliere Pokémon × 2 exemplaren (stage 0 + 1) per team"
+          subtitle="Alle reguliere Bokémon × 2 exemplaren (stage 0 + 1) per team"
           busy={busy === 'seed-pokedex'}
           onClick={() => withBusy('seed-pokedex', seedFullPokedex, 'Volledige Pokédex geseed')}
         />
         <SeedBtn
           emoji="🏆" label="Toernooi-ready"
-          subtitle="10 evolved Pokémon + 2 protects + 1 moon stone per team"
+          subtitle="10 evolved Bokémon + 2 protects + 1 moon stone per team"
           busy={busy === 'seed-tournament'}
           onClick={() => withBusy('seed-tournament', seedTournamentReady, 'Toernooi-scenario geladen')}
         />

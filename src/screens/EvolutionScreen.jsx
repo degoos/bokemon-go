@@ -165,7 +165,7 @@ export default function EvolutionScreen({ sessionId, team, catches: catchesProp,
     setSubmitting(null)
   }
 
-  // ── Pokémon sorteren: eerst evolutie-kandidaten ───────────────
+  // ── Bokémon sorteren: eerst evolutie-kandidaten ───────────────
   const myCatches = (liveCatches || [])
     .filter(c => c.team_id === team?.id)
     .sort((a, b) => {
@@ -243,7 +243,7 @@ export default function EvolutionScreen({ sessionId, team, catches: catchesProp,
           </div>
         )}
 
-        {/* Pokémon lijst */}
+        {/* Bokémon lijst */}
         {myCatches.map(c => {
           const def      = c.pokemon_definitions
           if (!def) return null
