@@ -195,6 +195,14 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   const myPlayer = players.find(p => p.id === player.id) || player
   const team = teams.find(t => t.id === myPlayer?.team_id) || null
 
+  // ── Fase-afleidingen (vroeg definiëren zodat alle useEffects ze kunnen gebruiken) ──
+  const currentPhase      = session?.status || 'collecting'
+  const isSetup           = currentPhase === 'setup'
+  const isCollecting      = currentPhase === 'collecting'
+  const isTrainingPhase   = currentPhase === 'training'
+  const isTournamentPhase = currentPhase === 'tournament'
+  const isFinished        = currentPhase === 'finished'
+
   // Speelgebied laden
   useEffect(() => {
     supabase.from('game_areas').select('*').eq('game_session_id', session.id)
@@ -284,16 +292,44 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   const fieldCenter = boundary ? getPolygonCenter(boundary.geojson) : null
   const mapCenter = position ? [position.lat, position.lon] : (fieldCenter || DEFAULT_CENTER)
 
-  const currentPhase    = session?.status || 'collecting'
-  const isCollecting    = currentPhase === 'collecting'
-  const isTrainingPhase = currentPhase === 'training'
-  const isTournamentPhase = currentPhase === 'tournament'
-  const isFinished      = currentPhase === 'finished'
-
   // Spawns enkel tonen in verzamelfase (tijdens training/toernooi zijn er geen actieve vangsten)
   const visibleSpawns = isCollecting ? spawns : []
 
   const showOverlay = ['catch','steal','inventory','pokedex','evolutie','toernooi'].includes(activeTab)
+
+  // ── Setup-fase: toon wachtscherm i.p.v. lege kaart ────────────
+  if (isSetup) {
+    return (
+      <div className="screen" style={{ alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32 }}>
+        <NotificationBanner notifications={notifications} />
+        <div style={{ fontSize: 64 }}>⏳</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontWeight: 800, fontSize: 22, color: '#facc15', marginBottom: 8 }}>
+            Wachten op Team Rocket
+          </div>
+          <div style={{ color: '#9090b0', fontSize: 14, lineHeight: 1.5 }}>
+            De spelleiding start zo de verzamelfase.<br />
+            Houd je smartphone bij de hand!
+          </div>
+        </div>
+        <div style={{
+          background: '#1e1e3a', border: '1px solid #2a2a4a', borderRadius: 14,
+          padding: '14px 20px', fontSize: 14, color: '#9090b0', textAlign: 'center',
+        }}>
+          {team
+            ? <span>Je speelt voor <strong style={{ color: team.color }}>{team.emoji} {team.name}</strong></span>
+            : <span style={{ color: '#6060a0' }}>Team laden...</span>
+          }
+        </div>
+        <button onClick={onSignOut} style={{
+          background: 'none', border: '1px solid #2a2a4a', borderRadius: 10,
+          color: '#6060a0', padding: '10px 20px', fontSize: 13, cursor: 'pointer', marginTop: 8,
+        }}>
+          ← Andere game code
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="screen">

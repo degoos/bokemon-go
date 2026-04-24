@@ -1,9 +1,46 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { supabase } from './lib/supabase'
 import JoinScreen from './screens/JoinScreen'
 import MapScreen from './screens/MapScreen'
 import AdminScreen from './screens/admin/AdminScreen'
 import SetupSessionScreen from './screens/SetupSessionScreen'
+
+// ── Error Boundary: toont een leesbare fout i.p.v. zwart scherm ──
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error) { return { error } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{
+          position: 'fixed', inset: 0, background: '#0f0f1a',
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          justifyContent: 'center', padding: 24, gap: 16,
+        }}>
+          <div style={{ fontSize: 48 }}>⚠️</div>
+          <div style={{ fontWeight: 800, fontSize: 18, color: '#ef4444' }}>Er ging iets mis</div>
+          <div style={{
+            background: '#1e1e3a', border: '1px solid #2a2a4a', borderRadius: 12,
+            padding: 16, fontSize: 12, color: '#9090b0', maxWidth: 360,
+            wordBreak: 'break-all', whiteSpace: 'pre-wrap',
+          }}>
+            {this.state.error?.message || String(this.state.error)}
+          </div>
+          <button
+            onClick={() => { localStorage.clear(); window.location.reload() }}
+            style={{
+              background: '#7c3aed', color: 'white', border: 'none', borderRadius: 12,
+              padding: '14px 24px', fontWeight: 700, fontSize: 16, cursor: 'pointer',
+            }}
+          >
+            🔄 Herstart & uitloggen
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 export default function App() {
   const [state, setState] = useState(null) // null = loading, 'join', 'game', 'admin', 'setup'
@@ -14,24 +51,27 @@ export default function App() {
   // Check localStorage voor bestaande sessie
   useEffect(() => {
     async function restore() {
-      const playerId = localStorage.getItem('bokemon_player_id')
-      const sessionId = localStorage.getItem('bokemon_session_id')
-      const admin = localStorage.getItem('bokemon_is_admin') === '1'
+      try {
+        const playerId = localStorage.getItem('bokemon_player_id')
+        const sessionId = localStorage.getItem('bokemon_session_id')
+        const admin = localStorage.getItem('bokemon_is_admin') === '1'
 
-      if (playerId && sessionId) {
-        const [{ data: p }, { data: s }] = await Promise.all([
-          supabase.from('players').select('*').eq('id', playerId).single(),
-          supabase.from('game_sessions').select('*').eq('id', sessionId).neq('status', 'finished').single(),
-        ])
-        if (p && s) {
-          setPlayer(p)
-          setSession(s)
-          setIsAdmin(admin)
-          setState(admin ? 'admin' : 'game')
-          // Update online status
-          await supabase.from('players').update({ is_online: true }).eq('id', playerId)
-          return
+        if (playerId && sessionId) {
+          const [{ data: p }, { data: s }] = await Promise.all([
+            supabase.from('players').select('*').eq('id', playerId).single(),
+            supabase.from('game_sessions').select('*').eq('id', sessionId).neq('status', 'finished').single(),
+          ])
+          if (p && s) {
+            setPlayer(p)
+            setSession(s)
+            setIsAdmin(admin)
+            setState(admin ? 'admin' : 'game')
+            await supabase.from('players').update({ is_online: true }).eq('id', playerId)
+            return
+          }
         }
+      } catch (e) {
+        console.error('Restore error:', e)
       }
       setState('join')
     }
@@ -63,29 +103,44 @@ export default function App() {
 
   if (state === null) {
     return (
-      <div className="loading">
-        <div className="spinner" />
-        <span>Laden...</span>
+      <div style={{
+        position: 'fixed', inset: 0, background: '#0f0f1a',
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', gap: 16,
+      }}>
+        <div style={{ fontSize: 48 }}>⚡</div>
+        <div style={{ color: '#9090b0', fontSize: 15 }}>Laden...</div>
       </div>
     )
   }
 
   if (state === 'join') {
-    return <JoinScreen onJoin={handleJoin} />
+    return <ErrorBoundary><JoinScreen onJoin={handleJoin} /></ErrorBoundary>
   }
 
   if (state === 'setup' && player) {
-    return <SetupSessionScreen player={player} onSessionCreated={s => { setSession(s); setState('admin') }} />
+    return (
+      <ErrorBoundary>
+        <SetupSessionScreen player={player} onSessionCreated={s => { setSession(s); setState('admin') }} />
+      </ErrorBoundary>
+    )
   }
 
   if (state === 'admin' && player && session) {
-    return <AdminScreen player={player} session={session} onSignOut={handleSignOut} />
+    return (
+      <ErrorBoundary>
+        <AdminScreen player={player} session={session} onSignOut={handleSignOut} />
+      </ErrorBoundary>
+    )
   }
 
   if (state === 'game' && player && session) {
-    const team = null // wordt geladen vanuit useGameSession
-    return <MapScreen player={player} session={session} team={team} isAdmin={isAdmin} onSignOut={handleSignOut} />
+    return (
+      <ErrorBoundary>
+        <MapScreen player={player} session={session} isAdmin={isAdmin} onSignOut={handleSignOut} />
+      </ErrorBoundary>
+    )
   }
 
-  return <JoinScreen onJoin={handleJoin} />
+  return <ErrorBoundary><JoinScreen onJoin={handleJoin} /></ErrorBoundary>
 }
