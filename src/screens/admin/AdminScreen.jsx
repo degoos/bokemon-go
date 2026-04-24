@@ -945,42 +945,6 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             </button>
           </div>
 
-          {/* Pokédex per team — overzicht gevangen Bokémon */}
-          {catches.length > 0 && (
-            <div className="card">
-              <h3 style={{ marginBottom: 12 }}>📖 Gevangen Bokémon</h3>
-              {teamScores.map(t => {
-                const teamCatches = catches.filter(c => c.team_id === t.id)
-                return (
-                  <div key={t.id} style={{ marginBottom: 14 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: t.color, marginBottom: 6 }}>
-                      {t.emoji} {t.name} ({teamCatches.length})
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {teamCatches.length === 0 ? (
-                        <span style={{ fontSize: 12, color: 'var(--text2)' }}>Nog niets gevangen</span>
-                      ) : teamCatches.map(c => (
-                        <div key={c.id} style={{
-                          padding: '4px 10px', borderRadius: 8, fontSize: 12,
-                          background: 'var(--bg3)', border: '1px solid var(--border)',
-                          display: 'flex', alignItems: 'center', gap: 5,
-                        }}>
-                          <span>{c.pokemon_definitions?.sprite_emoji}</span>
-                          <span style={{ fontWeight: 600 }}>{c.pokemon_definitions?.name}</span>
-                          {c.is_shiny && <span style={{ color: 'gold', fontSize: 10 }}>✨</span>}
-                          <span style={{ color: 'var(--text2)', fontSize: 11 }}>{c.cp}xp</span>
-                          {c.evolution_stage > 0 && (
-                            <span style={{ fontSize: 10, color: 'var(--success)' }}>Evo{c.evolution_stage}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
           {/* ── Direct toewijzen (correctie/noodtoewijzing) ── */}
           <div className="card" style={{ border: '1px solid #7c3aed44' }}>
             <h3 style={{ marginBottom: 4 }}>🎁 Direct toewijzen</h3>
