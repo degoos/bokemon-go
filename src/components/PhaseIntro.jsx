@@ -43,19 +43,26 @@ const INTROS = {
   },
 }
 
-// Duur van de cinematische prelude (alleen voor collecting)
-const PRELUDE_MS = 7000
+// Duur van de cinematische prelude (alleen voor collecting).
+// Lang genoeg om de caption rustig te lezen — speler kan altijd
+// vervroegd doorgaan via de "Ga verder"-knop.
+const PRELUDE_MS = 14000
+// Na hoeveel ms de "Ga verder"-knop zichtbaar wordt
+const PRELUDE_BTN_DELAY_MS = 2200
 
 export default function PhaseIntro({ phase, onDismiss }) {
   const cfg = INTROS[phase]
   const [scene, setScene] = useState(cfg?.cinematic ? 'prelude' : 'main')
   const [step, setStep]   = useState(0)
+  const [preludeBtnVisible, setPreludeBtnVisible] = useState(false)
 
-  // Van prelude → main scene
+  // Van prelude → main scene (auto na PRELUDE_MS)
   useEffect(() => {
     if (scene !== 'prelude') return
-    const t = setTimeout(() => setScene('main'), PRELUDE_MS)
-    return () => clearTimeout(t)
+    setPreludeBtnVisible(false)
+    const btn  = setTimeout(() => setPreludeBtnVisible(true), PRELUDE_BTN_DELAY_MS)
+    const auto = setTimeout(() => setScene('main'), PRELUDE_MS)
+    return () => { clearTimeout(btn); clearTimeout(auto) }
   }, [scene])
 
   // Stapsgewijze verschijning van de hoofdscene
@@ -85,13 +92,12 @@ export default function PhaseIntro({ phase, onDismiss }) {
   if (scene === 'prelude') {
     return (
       <div
-        onClick={() => setScene('main')}
         style={{
           position: 'fixed', inset: 0, zIndex: 9999,
           background: 'radial-gradient(circle at 50% 70%, #1a0a1a 0%, #050510 70%)',
           display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
-          padding: '24px', cursor: 'pointer',
+          padding: '24px 24px 40px', cursor: 'default',
           overflow: 'hidden',
         }}
       >
@@ -330,38 +336,66 @@ export default function PhaseIntro({ phase, onDismiss }) {
           ))}
         </div>
 
-        {/* Caption onderaan */}
+        {/* Caption onderaan — groter, beter leesbaar */}
         <div style={{
           textAlign: 'center',
-          maxWidth: 320,
-          animation: 'prelude-fadein 0.8s ease 0.5s both',
+          maxWidth: 360,
+          marginBottom: 28,
+          animation: 'prelude-fadein 0.9s ease 0.5s both',
         }}>
           <div style={{
-            fontSize: 11, fontWeight: 800, letterSpacing: 2.5,
-            color: '#ef4444', marginBottom: 8,
+            fontSize: 12, fontWeight: 800, letterSpacing: 2.5,
+            color: '#ef4444', marginBottom: 10,
             textTransform: 'uppercase',
+            textShadow: '0 0 10px #ef444466',
           }}>
             De Oudsberg — vannacht
           </div>
           <div style={{
-            fontSize: 14, color: '#ddd', lineHeight: 1.5,
+            fontSize: 16, color: '#eee', lineHeight: 1.55,
             fontStyle: 'italic',
-            textShadow: '0 0 8px #000',
+            textShadow: '0 1px 3px #000, 0 0 10px #000',
           }}>
-            Team Rocket steekt hun eigen <span style={{ color: '#facc15' }}>Pokéshop</span> in brand.
+            Team Rocket steekt hun eigen <span style={{ color: '#facc15', fontWeight: 700 }}>Pokéshop</span> in brand.
             <br />
-            Gevangen Bokémon ontsnappen naar de duinen...
+            Gevangen Bokémon ontsnappen naar de duinen —
+            <br />
+            <span style={{ color: '#bbb' }}>getraumatiseerd, op zoek naar een druppeltje.</span>
           </div>
         </div>
 
-        {/* tik-hint */}
+        {/* Ga verder — prominente knop (verschijnt na ~2s) */}
+        <button
+          onClick={() => setScene('main')}
+          style={{
+            position: 'relative', zIndex: 2,
+            opacity: preludeBtnVisible ? 1 : 0,
+            transform: preludeBtnVisible ? 'translateY(0)' : 'translateY(10px)',
+            transition: 'opacity 0.6s ease, transform 0.6s ease',
+            pointerEvents: preludeBtnVisible ? 'auto' : 'none',
+            background: 'linear-gradient(180deg, #7c3aed 0%, #5b21b6 100%)',
+            color: 'white',
+            border: '1px solid #a78bfa',
+            borderRadius: 14,
+            padding: '14px 34px',
+            fontSize: 16, fontWeight: 800, letterSpacing: 0.5,
+            cursor: 'pointer',
+            boxShadow: '0 0 24px #7c3aed66',
+            minWidth: 220,
+          }}
+        >
+          Ga verder →
+        </button>
+
+        {/* Subtle hint onder de knop */}
         <div style={{
-          position: 'absolute', bottom: 24,
-          fontSize: 11, color: '#555577',
-          opacity: 0.7,
-          animation: 'prelude-fadein 0.6s ease 3s both',
+          position: 'absolute', bottom: 14,
+          fontSize: 10, color: '#555577',
+          opacity: preludeBtnVisible ? 0.6 : 0,
+          transition: 'opacity 0.5s ease',
+          letterSpacing: 1,
         }}>
-          tik om door te gaan
+          auto-verder na {Math.round(PRELUDE_MS / 1000)}s
         </div>
       </div>
     )

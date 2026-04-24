@@ -400,6 +400,18 @@ h3 { font-size: 18px; font-weight: 700; }
 }
 
 /* ─────────────────────────────────────────────────────────── */
+/* Team Ash — rode pet filter                                   */
+/* De 🧢 emoji is standaard blauw op de meeste platforms.       */
+/* Deze hue-rotate verschuift hem naar Ash-rood.                */
+/* Toegepast via <TeamEmoji/> helper of data-red-cap attribuut. */
+/* ─────────────────────────────────────────────────────────── */
+.cap-red,
+[data-red-cap="true"] {
+  filter: hue-rotate(140deg) saturate(2.2) brightness(1.05);
+  display: inline-block;
+}
+
+/* ─────────────────────────────────────────────────────────── */
 /* Gameboy-stijl Pokéball throw animatie                        */
 /* ─────────────────────────────────────────────────────────── */
 .pokeball-overlay {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import TeamEmoji from './TeamEmoji'
 
 // ─────────────────────────────────────────────────────────────
 // HandicapPicker — admin-component om een handicap toe te wijzen
@@ -133,7 +134,7 @@ export default function HandicapPicker({ sessionId, teams, effects }) {
                 <div style={{ fontSize: 28 }}>{h.payload?.emoji || '🎭'}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 800, fontSize: 13 }}>
-                    {t.emoji} {t.name}: {h.payload?.name || 'Handicap'}
+                    <TeamEmoji emoji={t.emoji} /> {t.name}: {h.payload?.name || 'Handicap'}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text2)' }}>
                     {h.payload?.description}
@@ -207,7 +208,7 @@ export default function HandicapPicker({ sessionId, teams, effects }) {
                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                     }}
                   >
-                    {isTargetAssigning ? '⏳ …' : <>🎯 {t.emoji} {t.name}</>}
+                    {isTargetAssigning ? '⏳ …' : <>🎯 <TeamEmoji emoji={t.emoji} /> {t.name}</>}
                   </button>
                 )
               })}

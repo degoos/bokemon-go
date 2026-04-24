@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import TeamEmoji from '../components/TeamEmoji'
 
 export default function JoinScreen({ onJoin }) {
   const [step, setStep] = useState('code') // code | team | admin_setup
@@ -143,7 +144,7 @@ export default function JoinScreen({ onJoin }) {
                       background: selectedTeam === team.id ? `${team.color}22` : 'var(--card)',
                       color: 'var(--text)', transition: 'all 0.15s',
                     }}>
-                    {team.emoji} {team.name}
+                    <TeamEmoji emoji={team.emoji} /> {team.name}
                   </button>
                 ))}
               </div>

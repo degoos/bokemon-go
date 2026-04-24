@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import TeamEmoji from '../components/TeamEmoji'
 
 // ────────────────────────────────────────────────────────────
 // Constanten
@@ -154,7 +155,7 @@ function HPBar({ label, emoji, pokemon, hp, maxHp, color, eliminated, compact })
         }}>💀</div>
       )}
       <div style={{ fontWeight: 900, fontSize: 11, color, marginBottom: 2, letterSpacing: 0.5 }}>
-        {emoji} {label}
+        <TeamEmoji emoji={emoji} /> {label}
       </div>
       <div style={{ fontWeight: 800, fontSize: compact ? 12 : 14, color: '#e2e8f0', marginBottom: 6 }}>
         {pokemon}
@@ -669,7 +670,7 @@ export default function FinaleScreen({ session, sessionId, teams, catches, playe
                 flex: 1, background: t.color + '22', border: `2px solid ${t.color}`,
                 borderRadius: 12, padding: 14, textAlign: 'center',
               }}>
-                <div style={{ fontSize: 24 }}>{t.emoji}</div>
+                <div style={{ fontSize: 24 }}><TeamEmoji emoji={t.emoji} /></div>
                 <div style={{ fontWeight: 800, color: t.color, fontSize: 13, marginTop: 4 }}>{t.name}</div>
                 <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
                   {pikachuTeamId === t.id ? '⚡ Pikachu' : `${BASE_HP.regular} HP`}
@@ -765,7 +766,7 @@ export default function FinaleScreen({ session, sessionId, teams, catches, playe
               const isWinner = t.id === winnerId
               return (
                 <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #334155' }}>
-                  <div style={{ fontWeight: 700, color: t.color }}>{t.emoji} {t.name}</div>
+                  <div style={{ fontWeight: 700, color: t.color }}><TeamEmoji emoji={t.emoji} /> {t.name}</div>
                   <div style={{ fontWeight: 900, color: isWinner ? '#fbbf24' : '#dc2626' }}>
                     {isWinner ? '🥇 Winnaar' : '💀 Uitgeschakeld'}
                   </div>

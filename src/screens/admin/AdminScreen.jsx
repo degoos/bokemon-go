@@ -13,6 +13,7 @@ import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
 import HandicapPicker from '../../components/HandicapPicker'
 import PokedexScreen from '../PokedexScreen'
+import TeamEmoji from '../../components/TeamEmoji'
 import TournamentScreen from '../TournamentScreen'
 import FinaleScreen from '../FinaleScreen'
 import TestTools from './TestTools'
@@ -627,7 +628,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
 
   return (
     <div className="screen">
-      <NotificationBanner notifications={notifications} />
+      <NotificationBanner notifications={notifications} teams={teams} players={players} />
 
       {/* Topbar */}
       <div className="topbar">
@@ -695,7 +696,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
             <div key={t.id} className="card" style={{ borderLeft: `4px solid ${t.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontWeight: 800, fontSize: 18 }}>{t.emoji} {t.name}</div>
+                  <div style={{ fontWeight: 800, fontSize: 18 }}><TeamEmoji emoji={t.emoji} /> {t.name}</div>
                   <div style={{ color: 'var(--text2)', fontSize: 13, marginTop: 2 }}>
                     {t.pokemonCount} Bokémon
                   </div>
@@ -735,7 +736,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     >
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>{t.emoji} {t.name}</div>
+                        <div style={{ fontWeight: 800, fontSize: 14 }}><TeamEmoji emoji={t.emoji} /> {t.name}</div>
                         <div style={{ fontSize: 11, color: 'var(--text2)' }}>
                           {entries.length} soorten · {totalCount} gevangen
                         </div>
@@ -1007,7 +1008,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                           </div>
                           <div style={{ fontSize: 13, color: 'var(--text2)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                             <span style={{ color: teamInfo?.color || 'var(--text)', fontWeight: 700 }}>
-                              {teamInfo?.emoji} {teamInfo?.name}
+                              <TeamEmoji emoji={teamInfo?.emoji} /> {teamInfo?.name}
                             </span>
                             {!req.used_moon_stone && def?.linked_beer && (
                               <span>🍺 {def.linked_beer}</span>
@@ -1072,7 +1073,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                       <span>{req.status === 'approved' ? '✅' : '❌'}</span>
                       <span>{def?.sprite_emoji} {fromName} → {toName}</span>
                       <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text2)' }}>
-                        {req.teams?.emoji} {req.teams?.name}
+                        <TeamEmoji emoji={req.teams?.emoji} /> {req.teams?.name}
                       </span>
                     </div>
                   )
@@ -1527,7 +1528,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                 background: pokedexView === t.id ? t.color : 'var(--card)',
                 color: pokedexView === t.id ? '#fff' : 'var(--text2)',
                 boxShadow: pokedexView === t.id ? `0 0 10px ${t.color}66` : 'none',
-              }}>{t.emoji} {t.name}</button>
+              }}><TeamEmoji emoji={t.emoji} /> {t.name}</button>
             ))}
           </div>
 
@@ -1577,7 +1578,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                                 background: t.color + '33', color: t.color,
                                 border: `1px solid ${t.color}66`,
                               }}>
-                                {t.emoji} {t.name}{count > 1 ? ` ×${count}` : ''}
+                                <TeamEmoji emoji={t.emoji} /> {t.name}{count > 1 ? ` ×${count}` : ''}
                               </span>
                             )
                           })}

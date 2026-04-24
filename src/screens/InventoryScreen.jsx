@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { POKEMON_TYPES } from '../lib/constants'
+import TeamEmoji from '../components/TeamEmoji'
 
 // ─────────────────────────────────────────────────────────────
 // InventoryScreen — twee tabs (Bokémon + Items) + item-flows
@@ -376,7 +377,7 @@ export default function InventoryScreen({
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 22 }}>✕</button>
         <h3>🎒 Inventaris</h3>
         <div style={{ color: 'var(--text2)', fontSize: 13 }}>
-          {team?.emoji} {team?.name}
+          <TeamEmoji emoji={team?.emoji} /> {team?.name}
         </div>
       </div>
 

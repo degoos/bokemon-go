@@ -12,6 +12,7 @@ import StealFlow from '../components/StealFlow'
 import NotificationBanner from '../components/NotificationBanner'
 import PokeballThrow from '../components/PokeballThrow'
 import PhaseIntro from '../components/PhaseIntro'
+import TeamEmoji from '../components/TeamEmoji'
 import InventoryScreen from './InventoryScreen'
 import PokedexScreen from './PokedexScreen'
 import EvolutionScreen from './EvolutionScreen'
@@ -414,7 +415,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   if (isSetup) {
     return (
       <div className="screen" style={{ alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32 }}>
-        <NotificationBanner notifications={notifications} />
+        <NotificationBanner notifications={notifications} teams={teams} players={players} myTeamId={team?.id} />
         <div style={{ fontSize: 64 }}>⏳</div>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontWeight: 800, fontSize: 22, color: '#facc15', marginBottom: 8 }}>
@@ -430,7 +431,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
           padding: '14px 20px', fontSize: 14, color: '#9090b0', textAlign: 'center',
         }}>
           {team
-            ? <span>Je speelt voor <strong style={{ color: team.color }}>{team.emoji} {team.name}</strong></span>
+            ? <span>Je speelt voor <strong style={{ color: team.color }}><TeamEmoji emoji={team.emoji} /> {team.name}</strong></span>
             : <span style={{ color: '#6060a0' }}>Team laden...</span>
           }
         </div>
@@ -454,7 +455,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
         />
       )}
 
-      <NotificationBanner notifications={notifications} />
+      <NotificationBanner notifications={notifications} teams={teams} players={players} myTeamId={team?.id} />
 
       {/* Handicap banner — blijft zichtbaar op ALLE schermen zolang actief */}
       {activeHandicap && (

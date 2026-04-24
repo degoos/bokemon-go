@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { POKEMON_TYPES } from '../lib/constants'
+import TeamEmoji from '../components/TeamEmoji'
 
 // PokedexScreen — toont individuele vangsten (niet gegroepeerd).
 // embedded=true: geen screen-wrapper of topbar (voor gebruik in AdminScreen).
@@ -181,7 +182,7 @@ export default function PokedexScreen({
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 800, fontSize: 15 }}>Direct toewijzen</div>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-            Voeg Bokémon toe aan {currentTeam?.emoji} {currentTeam?.name} zonder opdracht
+            Voeg Bokémon toe aan <TeamEmoji emoji={currentTeam?.emoji} /> {currentTeam?.name} zonder opdracht
           </div>
         </div>
         <div style={{ fontSize: 18, color: 'var(--text2)' }}>
@@ -296,7 +297,7 @@ export default function PokedexScreen({
             }}
           >← Terug</button>
           <div style={{ flex: 1, fontWeight: 800, fontSize: 15, color: currentTeam?.color || 'var(--text)' }}>
-            {currentTeam?.emoji} {currentTeam?.name}
+            <TeamEmoji emoji={currentTeam?.emoji} /> {currentTeam?.name}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 700 }}>
             {totalCaught} gevangen

@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import TeamEmoji from '../../components/TeamEmoji'
 
 const ITEM_KEYS = [
   'moon_stone', 'silph_scope', 'protect', 'double_team', 'snatch',
@@ -334,7 +335,7 @@ export default function TestTools({ session, sessionId, teams, pokemons, catches
         </p>
         <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text2)' }}>
           Huidige state: <strong style={{ color: 'var(--text)' }}>{totalCatches}</strong> catches · {catchesByTeam.map(({ team, count }) => (
-            <span key={team.id} style={{ marginLeft: 6, color: team.color }}>{team.emoji} {count}</span>
+            <span key={team.id} style={{ marginLeft: 6, color: team.color }}><TeamEmoji emoji={team.emoji} /> {count}</span>
           ))}
         </div>
       </div>
@@ -416,7 +417,7 @@ export default function TestTools({ session, sessionId, teams, pokemons, catches
             background: 'var(--bg3)', border: `1px solid ${t.color}44`,
           }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: t.color, marginBottom: 8 }}>
-              {t.emoji} {t.name}
+              <TeamEmoji emoji={t.emoji} /> {t.name}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               {ITEM_KEYS.map(key => {

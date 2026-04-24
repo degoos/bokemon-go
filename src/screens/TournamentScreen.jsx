@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { TOURNAMENT_GYMS, XP_CATEGORIES, TYPE_ADVANTAGES, POKEMON_TYPES } from '../lib/constants'
+import TeamEmoji from '../components/TeamEmoji'
 
 // ────────────────────────────────────────────────────────────
 // Helpers
@@ -697,7 +698,7 @@ export default function TournamentScreen({
                       fontSize: 12, color: winnerTeam.color, fontWeight: 800,
                       background: winnerTeam.color + '22', borderRadius: 8, padding: '2px 8px',
                     }}>
-                      🏅 {winnerTeam.emoji} {winnerTeam.name}
+                      🏅 <TeamEmoji emoji={winnerTeam.emoji} /> {winnerTeam.name}
                     </span>
                   )}
                 </div>
@@ -721,7 +722,7 @@ export default function TournamentScreen({
                           color: t.color, fontWeight: 800, fontSize: 13, cursor: 'pointer',
                         }}
                       >
-                        {t.emoji} {t.name}
+                        <TeamEmoji emoji={t.emoji} /> {t.name}
                       </button>
                     ))}
                   </div>
@@ -771,7 +772,7 @@ export default function TournamentScreen({
           }}>
             <div style={{ fontSize: 40 }}>🏆</div>
             <div style={{ fontWeight: 900, fontSize: 20, color: winner?.color, marginTop: 8 }}>
-              {winner?.emoji} {winner?.name}
+              <TeamEmoji emoji={winner?.emoji} /> {winner?.name}
             </div>
             <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
               wint {g.naam}!
@@ -832,7 +833,7 @@ export default function TournamentScreen({
               KAMPIOEN
             </div>
             <div style={{ fontWeight: 900, fontSize: 28, color: '#fff', marginTop: 4 }}>
-              {champion?.emoji} {champion?.name}
+              <TeamEmoji emoji={champion?.emoji} /> {champion?.name}
             </div>
             <div style={{ fontSize: 14, color: '#fcd34d', marginTop: 6 }}>
               {ts[champion?.id] || 0} gym{ts[champion?.id] !== 1 ? 's' : ''} gewonnen
@@ -1057,7 +1058,7 @@ function GymScoreboard({ gymIdx, teams, results, compact, detailed, catches, mat
             background: t.color + '22', border: `1px solid ${t.color}44`, borderRadius: 8,
           }}>
             <div style={{ fontSize: 18, fontWeight: 900, color: t.color }}>{score[t.id] || 0}</div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{t.emoji} {t.name}</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}><TeamEmoji emoji={t.emoji} /> {t.name}</div>
           </div>
         ))}
       </div>
@@ -1105,7 +1106,7 @@ function TotalScoreboard({ teams, score, detailed }) {
             <div style={{ fontWeight: 900, fontSize: 18, width: 24, color: i === 0 ? '#fbbf24' : '#475569' }}>
               {i + 1}.
             </div>
-            <div style={{ flex: 1, fontWeight: 800, color: t.color }}>{t.emoji} {t.name}</div>
+            <div style={{ flex: 1, fontWeight: 800, color: t.color }}><TeamEmoji emoji={t.emoji} /> {t.name}</div>
             <div style={{ fontWeight: 900, fontSize: 18, color: '#fbbf24' }}>
               {score[t.id] || 0}
             </div>
