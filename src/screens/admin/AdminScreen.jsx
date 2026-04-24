@@ -859,6 +859,48 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                 ⏹️ Spel Afsluiten
               </button>
             </div>
+
+            {/* ── Test-modus toggle ───────────────────────── */}
+            <div style={{
+              marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  🧪 Test-modus
+                  {session?.is_test_mode && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 800, background: '#a855f7', color: '#fff',
+                      padding: '1px 6px', borderRadius: 99,
+                    }}>AAN</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2, lineHeight: 1.4 }}>
+                  Toont de 🧪-tab met seeders, reset-knoppen en item-editor. Niet gebruiken bij live spel.
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  const next = !session?.is_test_mode
+                  if (next) {
+                    if (!window.confirm('🧪 Test-modus activeren?\n\nDe 🧪-tab verschijnt met tools om catches/items te seeden en de state te wissen. Niet gebruiken tijdens een live spel met echte spelers.')) return
+                  }
+                  await supabase.from('game_sessions')
+                    .update({ is_test_mode: next })
+                    .eq('id', initialSession.id)
+                  refetch()
+                }}
+                style={{
+                  padding: '7px 14px', borderRadius: 99, border: 'none', cursor: 'pointer',
+                  fontWeight: 800, fontSize: 12, minWidth: 70, flexShrink: 0,
+                  background: session?.is_test_mode ? '#a855f7' : 'var(--bg3)',
+                  color: session?.is_test_mode ? '#fff' : 'var(--text2)',
+                  boxShadow: session?.is_test_mode ? '0 0 14px #a855f766' : 'none',
+                }}
+              >
+                {session?.is_test_mode ? 'Zet UIT' : 'Zet AAN'}
+              </button>
+            </div>
           </div>
 
           {/* ── Evolutieverzoeken ── */}
@@ -1871,39 +1913,6 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
           <div className="card">
             <h3 style={{ marginBottom: 16 }}>🎯 Opdrachten</h3>
             <ChallengeLibrary challenges={challenges} onUpdated={refreshChallenges} executionStats={opdrachtStats} />
-          </div>
-
-          {/* ── Test-modus toggle ───────────────────────────── */}
-          <div className="card" style={{ borderLeft: '3px solid #a855f7' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <h3 style={{ margin: 0, marginBottom: 4 }}>🧪 Test-modus</h3>
-                <p style={{ fontSize: 12, color: 'var(--text2)', margin: 0, lineHeight: 1.5 }}>
-                  Zet aan om de 🧪-tab te tonen met scenario-seeders, reset-knoppen en een item-editor. <strong style={{ color: '#a855f7' }}>Niet aanzetten tijdens een live spel.</strong>
-                </p>
-              </div>
-              <button
-                onClick={async () => {
-                  const next = !session?.is_test_mode
-                  if (next) {
-                    if (!window.confirm('🧪 Test-modus activeren?\n\nDe 🧪-tab verschijnt met tools om catches/items te seeden en de state te wissen. Niet gebruiken tijdens een live spel met echte spelers.')) return
-                  }
-                  await supabase.from('game_sessions')
-                    .update({ is_test_mode: next })
-                    .eq('id', initialSession.id)
-                  refetch()
-                }}
-                style={{
-                  padding: '8px 14px', borderRadius: 99, border: 'none', cursor: 'pointer',
-                  fontWeight: 800, fontSize: 13, minWidth: 80,
-                  background: session?.is_test_mode ? '#a855f7' : 'var(--bg3)',
-                  color: session?.is_test_mode ? '#fff' : 'var(--text2)',
-                  boxShadow: session?.is_test_mode ? '0 0 14px #a855f766' : 'none',
-                }}
-              >
-                {session?.is_test_mode ? '🧪 AAN' : 'UIT'}
-              </button>
-            </div>
           </div>
 
           <button className="btn btn-ghost" onClick={onSignOut}>🚪 Uitloggen</button>
