@@ -11,10 +11,30 @@ import { POKEMON_TYPES } from '../lib/constants'
  *
  * Dit scherm is alleen actief tijdens de 'training'-fase.
  */
-export default function EvolutionScreen({ sessionId, team, catches, inventory, currentPhase, onClose }) {
+export default function EvolutionScreen({ sessionId, team, catches: catchesProp, inventory, currentPhase, onClose }) {
   const [requests, setRequests]         = useState([])
   const [submitting, setSubmitting]     = useState(null)  // catch id bezig
   const [justEvolved, setJustEvolved]   = useState(new Set())
+  // Eigen catches-state zodat we altijd actuele data hebben (prop kan stale zijn)
+  const [liveCatches, setLiveCatches]   = useState(catchesProp || [])
+
+  useEffect(() => {
+    if (!sessionId || !team?.id) return
+    async function loadCatches() {
+      const { data } = await supabase
+        .from('catches')
+        .select('*, pokemon_definitions(*)')
+        .eq('game_session_id', sessionId)
+        .eq('team_id', team.id)
+      if (data) setLiveCatches(data)
+    }
+    loadCatches()
+    const ch = supabase.channel(`evo-catches-${sessionId}-${team.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'catches',
+        filter: `game_session_id=eq.${sessionId}` }, () => loadCatches())
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [sessionId, team?.id])
 
   const isTrainingPhase = currentPhase === 'training'
 
@@ -146,7 +166,7 @@ export default function EvolutionScreen({ sessionId, team, catches, inventory, c
   }
 
   // ── Pokémon sorteren: eerst evolutie-kandidaten ───────────────
-  const myCatches = (catches || [])
+  const myCatches = (liveCatches || [])
     .filter(c => c.team_id === team?.id)
     .sort((a, b) => {
       const aEvo = canEvolve(a), bEvo = canEvolve(b)
