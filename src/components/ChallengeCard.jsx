@@ -25,12 +25,24 @@ export default function ChallengeCard({ opdracht, resolvedData = {}, opdrachtTyp
   const [timeLeft, setTimeLeft] = useState(opdracht?.time_limit_seconds ?? null)
   const [timerActive, setTimerActive] = useState(false)
 
-  // Probeer de juiste variant; val terug op de andere als die leeg is
-  const beschrijving = opdrachtType === 2
-    ? resolveTemplate(opdracht?.beschrijving_t2t || opdracht?.beschrijving_solo || opdracht?.description, resolvedData)
-    : resolveTemplate(opdracht?.beschrijving_solo || opdracht?.beschrijving_t2t || opdracht?.description, resolvedData)
+  // Toon ALTIJD de volledige uitleg. t2t-teksten verwijzen vaak
+  // naar de solo-regels ("Beide teams spelen parallel. Snelste wint.")
+  // dus bij type 2 tonen we de solo-mechanics + de t2t-twist.
+  const soloText = resolveTemplate(opdracht?.beschrijving_solo || '', resolvedData)
+  const t2tText  = resolveTemplate(opdracht?.beschrijving_t2t  || '', resolvedData)
+  const descText = resolveTemplate(opdracht?.description       || '', resolvedData)
+
+  // Bepaal welke blokken we tonen en met welke labels
+  const showBoth  = opdrachtType === 2 && soloText && t2tText
+  const mainText  = opdrachtType === 2
+    ? (t2tText || soloText || descText)
+    : (soloText || t2tText || descText)
+  const extraText = showBoth ? soloText : null
+  const extraLabel = '📖 Basis-spelregels'
+  const mainLabel  = opdrachtType === 2 ? '⚔️ Team vs Team variant' : null
 
   const rekwisieten = opdracht?.rekwisieten || []
+  const variabelen  = opdracht?.variabelen  || []
   const catStyle = CAT_COLORS[opdracht?.categorie] || CAT_COLORS.Fysiek
 
   // Start timer bij mount
@@ -118,12 +130,68 @@ export default function ChallengeCard({ opdracht, resolvedData = {}, opdrachtTyp
 
       {/* Beschrijving */}
       <div className="card" style={{ margin: '12px 16px', textAlign: 'left' }}>
+        {/* Bij type 2 eerst de basis-spelregels (solo-versie) */}
+        {extraText && (
+          <>
+            <div style={{
+              fontSize: 11, color: 'var(--text2)', marginBottom: 6,
+              textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700,
+            }}>
+              {extraLabel}
+            </div>
+            <p style={{
+              color: 'var(--text)', lineHeight: 1.65, fontSize: 15,
+              whiteSpace: 'pre-line', marginBottom: 14,
+            }}>
+              {extraText}
+            </p>
+            <div style={{
+              height: 1, background: 'var(--border)',
+              margin: '12px -16px 14px',
+            }} />
+          </>
+        )}
+
+        {/* Hoofd-beschrijving (t2t-twist bij type 2, of volledige solo-regels bij type 1) */}
+        {mainLabel && (
+          <div style={{
+            fontSize: 11, color: 'var(--warning)', marginBottom: 6,
+            textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 700,
+          }}>
+            {mainLabel}
+          </div>
+        )}
         <p style={{
           color: 'var(--text)', lineHeight: 1.65, fontSize: 15,
           whiteSpace: 'pre-line',
         }}>
-          {beschrijving || 'Beschrijving volgt...'}
+          {mainText || 'Beschrijving volgt...'}
         </p>
+
+        {/* Ingestelde waarden (variabelen) — zodat spelers exact weten welke getallen gelden */}
+        {variabelen.length > 0 && Object.keys(resolvedData).length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+              Instellingen
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {variabelen.map((v, i) => {
+                const val = resolvedData?.[v.naam]
+                if (val === undefined || val === null) return null
+                const eenheid = v.eenheid ? ` ${v.eenheid}` : ''
+                return (
+                  <span key={i} style={{
+                    fontSize: 12, padding: '3px 10px', borderRadius: 99,
+                    background: 'rgba(124,58,237,0.15)', color: '#c4b5fd',
+                    border: '1px solid rgba(124,58,237,0.3)', fontWeight: 500,
+                  }}>
+                    {v.label || v.naam}: <strong>{String(val)}{eenheid}</strong>
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Rekwisieten */}
         {rekwisieten.length > 0 && (
