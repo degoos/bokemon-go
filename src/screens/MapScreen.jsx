@@ -13,6 +13,9 @@ import NotificationBanner from '../components/NotificationBanner'
 import PokeballThrow from '../components/PokeballThrow'
 import PhaseIntro from '../components/PhaseIntro'
 import TeamEmoji from '../components/TeamEmoji'
+import HelpGuide from '../components/HelpGuide'
+import TipToast from '../components/TipToast'
+import { useProgressiveTips } from '../hooks/useProgressiveTips'
 import InventoryScreen from './InventoryScreen'
 import PokedexScreen from './PokedexScreen'
 import EvolutionScreen from './EvolutionScreen'
@@ -219,11 +222,14 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   const [activeCatch, setActiveCatch] = useState(null)
   const [throwingAt, setThrowingAt] = useState(null) // spawn waar pokeball-animatie naartoe gaat
   const [stealChallenge, setStealChallenge] = useState(null)
+  const [stealCooldownUntil, setStealCooldownUntil] = useState(null) // Date: wanneer cooldown afloopt
+  const [stealChallengeActive, setStealChallengeActive] = useState(false) // loopt er al een challenge?
   const [areas, setAreas] = useState([])
   const [nowMs, setNowMs] = useState(Date.now())
   const [activeIntro, setActiveIntro] = useState(null) // welke fase-intro tonen
   const shownIntrosRef = useRef(new Set())             // bijhouden welke al getoond zijn
   const [poiPanel, setPoiPanel] = useState(null)       // {kind:'hq'|'shop', ...} — detail buiten MapContainer
+  const [helpOpen, setHelpOpen] = useState(false)      // 📖 spelgids open/dicht
   const mapRef = useRef(null)
 
   // Derive own team from loaded data
@@ -238,6 +244,29 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   const isTournamentPhase = currentPhase === 'tournament'
   const isFinished        = currentPhase === 'finished'
   const isLegendaryPhase  = isCollecting && !!(session?.legendary_phase_started_at)
+
+  // ── HQ-locatie voor progressive tips ──
+  const hqLocation = session?.hq_location && session.hq_location.lat && session.hq_location.lng
+    ? { lat: +session.hq_location.lat, lng: +session.hq_location.lng }
+    : null
+
+  // ── Progressive disclosure tips ──
+  const inventoryObj = Array.isArray(inventory)
+    ? Object.fromEntries(inventory.map(i => [i.item_key, i.quantity]))
+    : (inventory || {})
+  const { currentTip, dismissTip } = useProgressiveTips({
+    sessionId: session.id,
+    teamId: team?.id,
+    phase: currentPhase,
+    spawns,
+    catches,
+    inventory: inventoryObj,
+    effects,
+    position,
+    hqLocation,
+    gameStartedAt: session?.started_at,
+    isLegendaryPhase,
+  })
 
   // Speelgebied laden
   useEffect(() => {
@@ -319,10 +348,23 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
         (p) => {
           if (p.new.defender_team_id === team.id || p.new.attacker_team_id === team.id) {
             setStealChallenge(p.new)
+            setStealChallengeActive(true)
             setActiveTab('steal')
           }
         }
-      ).subscribe()
+      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'steal_challenges',
+        filter: `game_session_id=eq.${session.id}` },
+        (p) => {
+          if (p.new.status === 'finished' &&
+              (p.new.defender_team_id === team.id || p.new.attacker_team_id === team.id)) {
+            // Challenge afgerond: herbereken blokkeer-status
+            setStealChallengeActive(false)
+            refreshStealStatus()
+          }
+        }
+      )
+      .subscribe()
     return () => supabase.removeChannel(ch)
   }, [team?.id, player.id, session.id])
 
@@ -374,10 +416,117 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
     return () => clearTimeout(t)
   }, [throwingAt])
 
+  // Cooldown-duur in seconden (configureerbaar via sessie, standaard 120s)
+  const STEAL_COOLDOWN_SEC = (session?.steal_cooldown_minutes ?? 2) * 60
+
+  // Herbereken steal-blokkeerstatus vanuit recente DB-data
+  async function refreshStealStatus() {
+    if (!team?.id) return
+    const enemyTeam = teams.find(t => t.id !== team.id)
+    if (!enemyTeam) return
+
+    // 1. Actieve challenge tussen deze twee teams?
+    const { data: active } = await supabase
+      .from('steal_challenges')
+      .select('id')
+      .eq('game_session_id', session.id)
+      .in('status', ['waiting', 'playing'])
+      .or(`and(attacker_team_id.eq.${team.id},defender_team_id.eq.${enemyTeam.id}),and(attacker_team_id.eq.${enemyTeam.id},defender_team_id.eq.${team.id})`)
+      .limit(1)
+
+    if (active && active.length > 0) {
+      setStealChallengeActive(true)
+      setStealCooldownUntil(null)
+      return
+    }
+    setStealChallengeActive(false)
+
+    // 2. Cooldown: was ons team de verdediger in de afgelopen X seconden?
+    const cooldownCutoff = new Date(Date.now() - STEAL_COOLDOWN_SEC * 1000).toISOString()
+    const { data: recent } = await supabase
+      .from('steal_challenges')
+      .select('finished_at')
+      .eq('game_session_id', session.id)
+      .eq('defender_team_id', team.id)
+      .eq('status', 'finished')
+      .gt('finished_at', cooldownCutoff)
+      .order('finished_at', { ascending: false })
+      .limit(1)
+
+    if (recent && recent.length > 0) {
+      const until = new Date(new Date(recent[0].finished_at).getTime() + STEAL_COOLDOWN_SEC * 1000)
+      setStealCooldownUntil(until)
+    } else {
+      setStealCooldownUntil(null)
+    }
+  }
+
+  // Herbereken wanneer fase/teams laden, en na elke afgeronde challenge
+  useEffect(() => { refreshStealStatus() }, [team?.id, session?.id])
+
+  // Countdown-ticker voor steal cooldown
+  useEffect(() => {
+    if (!stealCooldownUntil) return
+    if (stealCooldownUntil <= new Date()) { setStealCooldownUntil(null); return }
+    const iv = setInterval(() => {
+      if (new Date() >= stealCooldownUntil) { setStealCooldownUntil(null); clearInterval(iv) }
+      else setNowMs(Date.now())
+    }, 1000)
+    return () => clearInterval(iv)
+  }, [stealCooldownUntil])
+
   async function startSteal() {
     if (!team) return
     const enemyTeam = teams.find(t => t.id !== team.id)
     if (!enemyTeam) return
+
+    // Haal meest actuele status op voor het drukken
+    await refreshStealStatus()
+
+    // Na refresh: hercheck state (React batcht, gebruik directe DB-uitslag)
+    const { data: active } = await supabase
+      .from('steal_challenges')
+      .select('id')
+      .eq('game_session_id', session.id)
+      .in('status', ['waiting', 'playing'])
+      .or(`and(attacker_team_id.eq.${team.id},defender_team_id.eq.${enemyTeam.id}),and(attacker_team_id.eq.${enemyTeam.id},defender_team_id.eq.${team.id})`)
+      .limit(1)
+
+    if (active && active.length > 0) {
+      await supabase.from('notifications').insert({
+        game_session_id: session.id,
+        title: '⚔️ Challenge al bezig',
+        message: 'Er loopt al een steal-challenge tussen jullie teams. Wacht tot die afgelopen is.',
+        type: 'warning', emoji: '⚔️',
+        target_team_id: team.id,
+      })
+      return
+    }
+
+    const cooldownCutoff = new Date(Date.now() - STEAL_COOLDOWN_SEC * 1000).toISOString()
+    const { data: recent } = await supabase
+      .from('steal_challenges')
+      .select('finished_at')
+      .eq('game_session_id', session.id)
+      .eq('defender_team_id', team.id)
+      .eq('status', 'finished')
+      .gt('finished_at', cooldownCutoff)
+      .order('finished_at', { ascending: false })
+      .limit(1)
+
+    if (recent && recent.length > 0) {
+      const until = new Date(new Date(recent[0].finished_at).getTime() + STEAL_COOLDOWN_SEC * 1000)
+      const remainSec = Math.max(0, Math.ceil((until - Date.now()) / 1000))
+      await supabase.from('notifications').insert({
+        game_session_id: session.id,
+        title: '⏱️ Cooldown actief',
+        message: `Jullie werden net aangevallen. Nog ${remainSec} seconden wachten voor jullie zelf mogen aanvallen.`,
+        type: 'warning', emoji: '⏱️',
+        target_team_id: team.id,
+      })
+      return
+    }
+
     const { data } = await supabase.from('steal_challenges').insert({
       game_session_id: session.id,
       attacker_team_id: team.id,
@@ -992,6 +1141,45 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
         </>
       )}
 
+      {/* ── Spelgids-knop (drijvend, altijd bereikbaar als kaart zichtbaar is) ── */}
+      {!showOverlay && !helpOpen && (
+        <button
+          onClick={() => setHelpOpen(true)}
+          style={{
+            position: 'absolute',
+            top: 52,
+            left: 12,
+            zIndex: 500,
+            background: 'rgba(15, 20, 35, 0.88)',
+            border: '1px solid rgba(250,204,21,0.4)',
+            borderRadius: 99,
+            color: '#facc15',
+            fontSize: 13,
+            fontWeight: 800,
+            padding: '7px 13px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <span>📖</span>
+          <span>Spelgids</span>
+        </button>
+      )}
+
+      {/* ── Progressive disclosure tip ── */}
+      {!showOverlay && !helpOpen && (
+        <TipToast tip={currentTip} onDismiss={dismissTip} />
+      )}
+
+      {/* ── Spelgids overlay ── */}
+      {helpOpen && (
+        <HelpGuide phase={currentPhase} onClose={() => setHelpOpen(false)} />
+      )}
+
       {/* ── Bottombar — inhoud afhankelijk van fase ── */}
       {!showOverlay && (
         <div className="bottombar">
@@ -1001,11 +1189,27 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
           </button>
 
           {/* Middelste knop: fase-afhankelijk */}
-          {isCollecting && (
-            <button className="bottombar-btn" onClick={startSteal}>
-              <span className="icon">⚔️</span><span>Stelen</span>
-            </button>
-          )}
+          {isCollecting && (() => {
+            const cooldownRemainSec = stealCooldownUntil
+              ? Math.max(0, Math.ceil((stealCooldownUntil - nowMs) / 1000))
+              : 0
+            const isBlocked = stealChallengeActive || cooldownRemainSec > 0
+            return (
+              <button
+                className="bottombar-btn"
+                onClick={startSteal}
+                style={isBlocked ? { opacity: 0.5 } : undefined}
+              >
+                <span className="icon">⚔️</span>
+                {stealChallengeActive
+                  ? <span style={{ fontSize: 10, lineHeight: 1.2 }}>Challenge<br/>bezig…</span>
+                  : cooldownRemainSec > 0
+                    ? <span style={{ fontSize: 10, lineHeight: 1.2 }}>Stelen<br/>⏱️ {cooldownRemainSec}s</span>
+                    : <span>Stelen</span>
+                }
+              </button>
+            )
+          })()}
           {isTrainingPhase && (
             <button
               className={`bottombar-btn ${activeTab==='evolutie'?'active':''}`}
