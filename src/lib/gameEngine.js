@@ -90,9 +90,77 @@ export async function runGameEngine(sessionId) {
   return { metrics, suggestions }
 }
 
+// ── Legendarische Eindfase starten ───────────────────────────────
+// Zet legendary_phase_started_at op de sessie en spawnt Pikachu
+// automatisch op een willekeurige locatie binnen het speelveld.
+export async function startLegendaryPhase(sessionId) {
+  // 1. Zet timestamp op sessie
+  const { error } = await supabase
+    .from('game_sessions')
+    .update({ legendary_phase_started_at: new Date().toISOString() })
+    .eq('id', sessionId)
+  if (error) { console.error('startLegendaryPhase:', error); return null }
+
+  // 2. Haal Pikachu op (is_special_spawn = true)
+  const { data: pikachu } = await supabase
+    .from('pokemon_definitions')
+    .select('*')
+    .eq('name', 'Pikachu')
+    .single()
+
+  if (!pikachu) { console.warn('Pikachu niet gevonden in DB'); return null }
+
+  // 3. Zoek een willekeurige locatie binnen het speelveld
+  const { data: areas } = await supabase
+    .from('game_areas')
+    .select('*')
+    .eq('game_session_id', sessionId)
+
+  const boundary = areas?.find(a => a.type === 'boundary')
+  if (!boundary) return null
+
+  const bounds = getBoundsFromGeoJSON(boundary.geojson)
+  const boundaryCoords = (boundary.geojson?.geometry?.coordinates?.[0] || []).map(([lon, lat]) => [lat, lon])
+
+  let lat, lon, attempts = 0
+  do {
+    const pt = randomPointInBounds(bounds)
+    lat = pt.lat; lon = pt.lon
+    attempts++
+  } while (boundaryCoords.length > 2 && !pointInPolygon([lat, lon], boundaryCoords) && attempts < 30)
+
+  const cp = Math.floor(pikachu.cp_min + Math.random() * (pikachu.cp_max - pikachu.cp_min))
+
+  // 4. Spawn Pikachu als legendary
+  const { data: spawn } = await supabase.from('active_spawns').insert({
+    game_session_id: sessionId,
+    pokemon_definition_id: pikachu.id,
+    latitude: lat,
+    longitude: lon,
+    spawn_type: 'legendary',
+    cp,
+    requires_opdracht: true,
+    catch_radius_meters: 50,
+    status: 'active',
+    expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 60 min (eindigt met fase)
+  }).select().single()
+
+  // 5. Dramatische notificatie naar alle spelers
+  await supabase.from('notifications').insert({
+    game_session_id: sessionId,
+    title: '👑 De Legendarische Eindfase is begonnen!',
+    message: '⚡ Pikachu is gespot in het gebied — en dit zijn de laatste minuten van de verzamelfase!',
+    type: 'warning',
+    emoji: '⚡',
+  })
+
+  return spawn
+}
+
 // Spawn een Bokémon op een willekeurige locatie binnen het speelveld,
 // rekening houdend met biome-zones (biome-type krijgt voorkeur).
-export async function autoSpawnPokemon(sessionId) {
+// Tijdens de legendarische eindfase worden alle spawns automatisch legendary.
+export async function autoSpawnPokemon(sessionId, isLegendaryPhase = false) {
   // Haal speelveld EN biome-zones op in één query
   const { data: areas } = await supabase
     .from('game_areas')
@@ -152,9 +220,9 @@ export async function autoSpawnPokemon(sessionId) {
 
   const cp = Math.floor(pokemon.cp_min + Math.random() * (pokemon.cp_max - pokemon.cp_min))
 
-  // Bepaal spawn type
-  const isShiny = Math.random() * 100 < (pokemon.shiny_chance || 5)
-  const spawnType = isShiny ? 'shiny' : 'normal'
+  // Bepaal spawn type: legendary fase overschrijft alles
+  const isShiny = !isLegendaryPhase && Math.random() * 100 < (pokemon.shiny_chance || 5)
+  const spawnType = isLegendaryPhase ? 'legendary' : isShiny ? 'shiny' : 'normal'
 
   const { data: spawn } = await supabase.from('active_spawns').insert({
     game_session_id: sessionId,

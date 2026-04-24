@@ -205,6 +205,7 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
   const isTrainingPhase   = currentPhase === 'training'
   const isTournamentPhase = currentPhase === 'tournament'
   const isFinished        = currentPhase === 'finished'
+  const isLegendaryPhase  = isCollecting && !!(session?.legendary_phase_started_at)
 
   // Speelgebied laden
   useEffect(() => {
@@ -568,8 +569,25 @@ export default function MapScreen({ player, session: initialSession, isAdmin, on
       {/* ── Fase-banner (altijd zichtbaar op de kaart, niet tijdens overlays) ── */}
       {!showOverlay && (
         <>
-          {/* Verzamelfase: subtiele pill rechtsboven */}
-          {isCollecting && (
+          {/* Legendarische eindfase: prominente gouden banner */}
+          {isLegendaryPhase && (
+            <div style={{
+              position: 'absolute', top: 10, left: 12, right: 12, zIndex: 600,
+              background: 'rgba(120, 53, 15, 0.96)', border: '1px solid #d97706',
+              borderRadius: 12, padding: '8px 14px',
+              display: 'flex', alignItems: 'center', gap: 8,
+              animation: 'bokePulse 2s ease-in-out infinite',
+            }}>
+              <span style={{ fontSize: 18 }}>👑</span>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: '#fbbf24' }}>Legendarische Eindfase!</div>
+                <div style={{ fontSize: 11, color: '#fde68a' }}>Pikachu is ergens op de kaart — dit zijn de laatste minuten!</div>
+              </div>
+            </div>
+          )}
+
+          {/* Verzamelfase: subtiele pill rechtsboven (verborgen tijdens legendary) */}
+          {isCollecting && !isLegendaryPhase && (
             <div style={{
               position: 'absolute', top: 10, right: 12, zIndex: 600,
               background: 'rgba(20, 83, 45, 0.92)', border: '1px solid #166534',

@@ -7,7 +7,7 @@ import { useGameSession } from '../../hooks/useGameSession'
 import { usePlayerLocation } from '../../hooks/usePlayerLocation'
 import { POKEMON_TYPES, DEFAULT_CENTER, DEFAULT_ZOOM } from '../../lib/constants'
 import { getPolygonCenter, pointInPolygon } from '../../lib/geo'
-import { autoSpawnPokemon, buildSpawnNotification } from '../../lib/gameEngine'
+import { autoSpawnPokemon, startLegendaryPhase, buildSpawnNotification } from '../../lib/gameEngine'
 import NotificationBanner from '../../components/NotificationBanner'
 import ChallengeSelector from '../../components/ChallengeSelector'
 import ChallengeLibrary from '../../components/ChallengeLibrary'
@@ -390,19 +390,21 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
     const pokemon = pokemons.find(p => p.id === spawnForm.pokemonId)
     if (!pokemon) return
     const cp = Math.floor(pokemon.cp_min + Math.random() * (pokemon.cp_max - pokemon.cp_min))
+    // Tijdens legendary fase: altijd legendary type, ongeacht keuze in form
+    const effectiveSpawnType = isLegendaryPhase ? 'legendary' : spawnForm.spawnType
     await supabase.from('active_spawns').insert({
       game_session_id: initialSession.id,
       pokemon_definition_id: pokemon.id,
       latitude: pendingSpawnLoc.lat,
       longitude: pendingSpawnLoc.lng,
-      spawn_type: spawnForm.spawnType,
+      spawn_type: effectiveSpawnType,
       cp,
       requires_opdracht: spawnForm.requiresOpdracht,
       catch_radius_meters: spawnForm.catchRadius || 50,
       status: 'active',
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     })
-    const notif = buildSpawnNotification(pokemon, spawnForm.spawnType)
+    const notif = buildSpawnNotification(pokemon, effectiveSpawnType)
     await supabase.from('notifications').insert({
       game_session_id: initialSession.id,
       title: notif.title,
@@ -537,6 +539,7 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
   })()
 
   const currentPhase = session?.status || 'setup'
+  const isLegendaryPhase = !!(session?.legendary_phase_started_at)
   const pendingEvents = events.filter(e => e.status === 'pending')
 
   return (
@@ -763,6 +766,29 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
               >
                 🟢 Start Verzamelfase
               </button>
+
+              {/* Legendarische Eindfase — alleen tonen tijdens verzamelfase */}
+              {currentPhase === 'collecting' && (
+                <button
+                  className="btn btn-sm"
+                  style={{
+                    background: isLegendaryPhase ? '#3b2800' : '#1a1200',
+                    color: isLegendaryPhase ? '#fbbf24' : '#d97706',
+                    border: `1px solid ${isLegendaryPhase ? '#92400e' : '#78350f'}`,
+                    opacity: isLegendaryPhase ? 0.6 : 1,
+                    cursor: isLegendaryPhase ? 'default' : 'pointer',
+                  }}
+                  disabled={isLegendaryPhase}
+                  onClick={async () => {
+                    if (!window.confirm('⚡ Legendarische Eindfase starten?\nPikachu spawnt automatisch op de kaart. Alle volgende spawns worden legendary.')) return
+                    await startLegendaryPhase(initialSession.id)
+                    refetch()
+                  }}
+                >
+                  {isLegendaryPhase ? '👑 Legendarische Eindfase Actief' : '👑 Start Legendarische Eindfase'}
+                </button>
+              )}
+
               <button
                 className="btn btn-sm"
                 style={{ background: '#166534', color: '#86efac', border: '1px solid #166534' }}
@@ -1222,32 +1248,20 @@ export default function AdminScreen({ player, session: initialSession, onSignOut
                 </div>
                 <div className="field">
                   <label>Type</label>
-                  {(() => {
-                    const remainingMin = session?.target_end_time
-                      ? Math.max(0, (new Date(session.target_end_time) - Date.now()) / 60000)
-                      : null
-                    const legendaryAllowed = remainingMin === null || remainingMin <= 10
-                    return (
-                      <>
-                        <select value={spawnForm.spawnType} onChange={e => setSpawnForm(f => ({ ...f, spawnType: e.target.value }))}>
-                          <option value="normal">⬜ Normaal</option>
-                          <option value="shiny">✨ Blinkend</option>
-                          <option value="mystery">❓ Mystery</option>
-                          {legendaryAllowed && <option value="legendary">👑 Legendary</option>}
-                        </select>
-                        {!legendaryAllowed && (
-                          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4, padding: '4px 8px', background: 'var(--bg3)', borderRadius: 6 }}>
-                            👑 Legendary beschikbaar in laatste 10 min ({Math.ceil(remainingMin)} min resterend)
-                          </div>
-                        )}
-                        {!session?.target_end_time && (
-                          <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>
-                            ⚠️ Geen doeltijd ingesteld — legendary altijd beschikbaar
-                          </div>
-                        )}
-                      </>
-                    )
-                  })()}
+                  {isLegendaryPhase ? (
+                    <div style={{
+                      padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                      background: '#1a1200', color: '#fbbf24', border: '1px solid #92400e',
+                    }}>
+                      👑 Automatisch Legendary (eindfase actief)
+                    </div>
+                  ) : (
+                    <select value={spawnForm.spawnType} onChange={e => setSpawnForm(f => ({ ...f, spawnType: e.target.value }))}>
+                      <option value="normal">⬜ Normaal</option>
+                      <option value="shiny">✨ Blinkend</option>
+                      <option value="mystery">❓ Mystery</option>
+                    </select>
+                  )}
                 </div>
                 <div className="field">
                   <label>Vangst-radius (meter)</label>
