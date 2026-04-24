@@ -187,13 +187,13 @@ export default function HQScreen({ sessionId, team, player, onClose }) {
   // RENDER: mini-game (als actief) — anders overview + modal
   // ─────────────────────────────────────────────────────────
   if (activeRoom === 1 && !completingRoom) {
-    return <VuilbakGame onComplete={() => handleRoomComplete(1)} onAbort={() => setActiveRoom(null)} />
+    return <VuilbakGame team={team} onComplete={() => handleRoomComplete(1)} onAbort={() => setActiveRoom(null)} />
   }
   if (activeRoom === 2 && !completingRoom) {
-    return <SpinnerGame onComplete={() => handleRoomComplete(2)} onAbort={() => setActiveRoom(null)} />
+    return <SpinnerGame team={team} onComplete={() => handleRoomComplete(2)} onAbort={() => setActiveRoom(null)} />
   }
   if (activeRoom === 3 && !completingRoom) {
-    return <BoulderGame onComplete={() => handleRoomComplete(3)} onAbort={() => setActiveRoom(null)} />
+    return <BoulderGame team={team} onComplete={() => handleRoomComplete(3)} onAbort={() => setActiveRoom(null)} />
   }
 
   return (

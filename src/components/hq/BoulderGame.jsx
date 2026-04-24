@@ -3,49 +3,73 @@ import { useState, useEffect, useRef } from 'react'
 // ─────────────────────────────────────────────────────────────
 // BoulderGame — Kamer 3 (Kluis)
 //
-// Sokoban-puzzel geïnspireerd op Strength HM puzzles. 5x5 grid,
-// 2 blokken + 2 drukplaten. Beweging via arrow-knoppen (of pijltjes
-// toetsen op desktop). Pushen: bij beweging richting een blok wordt
-// die in dezelfde richting geduwd. Niet door muren/blokken. Alle
-// blokken op een plaat = kluis open. Reset-knop bij vastzitten.
+// Sokoban-puzzel geïnspireerd op de Strength HM puzzles van Seafoam
+// Islands en Victory Road. 6x6 grid, 3 blokken + 3 drukplaten, muren.
+// Eén blok in een hoek zonder plaat = vast → gebruik RESET of UNDO.
+//
+// v2: 3 blokken/3 platen + muren + undo-knop + team-sprite.
 // ─────────────────────────────────────────────────────────────
 
-const SIZE = 5
+const SIZE = 6
+const STEP_MS = 160
+
+// Muren — obstakels die blokken en speler blokkeren
+const WALLS = new Set([
+  '2,4', '3,4',   // muur tussen midden en bovenkant
+  '2,1', '3,1',   // muur tussen midden en onderkant
+])
 
 // Initiële stand — vast level, gegarandeerd oplosbaar
-// y=0 onder, y=4 boven
+// y=0 onder, y=5 boven
 const INITIAL = {
   player: { x: 0, y: 0 },
   boulders: [
-    { x: 1, y: 2 },
-    { x: 3, y: 2 },
+    { x: 1, y: 3 },
+    { x: 4, y: 3 },
+    { x: 2, y: 2 },
   ],
   plates: [
-    { x: 1, y: 4 },
-    { x: 3, y: 4 },
+    { x: 0, y: 5 },
+    { x: 5, y: 5 },
+    { x: 5, y: 0 },
   ],
 }
 
 const DELTA = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] }
 
-export default function BoulderGame({ onComplete, onAbort }) {
+function isWall(x, y) { return WALLS.has(`${x},${y}`) }
+function inBounds(x, y) { return x >= 0 && x < SIZE && y >= 0 && y < SIZE }
+
+export default function BoulderGame({ team, onComplete, onAbort }) {
   const [player, setPlayer] = useState(INITIAL.player)
   const [boulders, setBoulders] = useState(INITIAL.boulders)
+  const [history, setHistory] = useState([])
   const [moves, setMoves] = useState(0)
   const [done, setDone] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const [moving, setMoving] = useState(false)
   const startTimeRef = useRef(Date.now())
   const completedRef = useRef(false)
+  const timeoutsRef = useRef([])
 
-  // Klok
+  const sprite = team?.emoji || '🏃'
+  const teamColor = team?.color || '#4ade80'
+
   useEffect(() => {
     const iv = setInterval(() => setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000)), 500)
     return () => clearInterval(iv)
   }, [])
 
-  function inBounds(x, y) {
-    return x >= 0 && x < SIZE && y >= 0 && y < SIZE
+  useEffect(() => () => timeoutsRef.current.forEach(t => clearTimeout(t)), [])
+
+  function schedule(fn, delay) {
+    const id = setTimeout(() => {
+      timeoutsRef.current = timeoutsRef.current.filter(x => x !== id)
+      fn()
+    }, delay)
+    timeoutsRef.current.push(id)
   }
+
   function boulderIndexAt(x, y, list = boulders) {
     return list.findIndex(b => b.x === x && b.y === y)
   }
@@ -57,69 +81,97 @@ export default function BoulderGame({ onComplete, onAbort }) {
   }
 
   function move(dir) {
-    if (done || completedRef.current) return
+    if (done || completedRef.current || moving) return
     const [dx, dy] = DELTA[dir]
     const nx = player.x + dx
     const ny = player.y + dy
     if (!inBounds(nx, ny)) return
+    if (isWall(nx, ny)) return
 
     const bIdx = boulderIndexAt(nx, ny)
     if (bIdx >= 0) {
-      // Probeer blok te duwen
+      // Blok duwen
       const bx = nx + dx
       const by = ny + dy
-      if (!inBounds(bx, by)) return                // randmuur blokkeert
-      if (boulderIndexAt(bx, by) >= 0) return      // ander blok blokkeert
+      if (!inBounds(bx, by)) return
+      if (isWall(bx, by)) return
+      if (boulderIndexAt(bx, by) >= 0) return
+
+      // Snapshot voor undo
+      setHistory(h => [...h, { player: { ...player }, boulders: boulders.map(b => ({ ...b })) }])
+
       const newBoulders = boulders.map((b, i) => i === bIdx ? { x: bx, y: by } : b)
+      setMoving(true)
       setBoulders(newBoulders)
       setPlayer({ x: nx, y: ny })
       setMoves(m => m + 1)
+      schedule(() => setMoving(false), STEP_MS)
       if (allOnPlates(newBoulders)) {
         setDone(true)
         completedRef.current = true
-        setTimeout(() => { if (onComplete) onComplete() }, 1800)
+        schedule(() => { if (onComplete) onComplete() }, 1800)
       }
     } else {
-      // Vrije beweging
+      // Vrij bewegen
+      setHistory(h => [...h, { player: { ...player }, boulders: boulders.map(b => ({ ...b })) }])
+      setMoving(true)
       setPlayer({ x: nx, y: ny })
       setMoves(m => m + 1)
+      schedule(() => setMoving(false), STEP_MS)
     }
+  }
+
+  function undo() {
+    if (completedRef.current || history.length === 0) return
+    const prev = history[history.length - 1]
+    setPlayer(prev.player)
+    setBoulders(prev.boulders)
+    setHistory(h => h.slice(0, -1))
+    setMoves(m => Math.max(0, m - 1))
   }
 
   function reset() {
     if (completedRef.current) return
+    timeoutsRef.current.forEach(t => clearTimeout(t))
+    timeoutsRef.current = []
     setPlayer(INITIAL.player)
     setBoulders(INITIAL.boulders)
-    setMoves(0); setDone(false)
+    setHistory([])
+    setMoves(0)
+    setDone(false)
+    setMoving(false)
     startTimeRef.current = Date.now(); setElapsed(0)
   }
 
-  // Keyboard-support (desktop testing)
+  // Keyboard
   useEffect(() => {
     function onKey(e) {
       if (done) return
       const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }
       const dir = map[e.key]
       if (dir) { e.preventDefault(); move(dir) }
+      if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); undo() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  // Render-grid: y=4 bovenaan, y=0 onderaan
-  const rows = []
+  // Render-grid: y=SIZE-1 bovenaan, y=0 onderaan
+  const cells = []
   for (let y = SIZE - 1; y >= 0; y--) {
-    const cols = []
     for (let x = 0; x < SIZE; x++) {
-      const isPlayer  = player.x === x && player.y === y
-      const bIdx      = boulderIndexAt(x, y)
-      const hasBlock  = bIdx >= 0
-      const hasPlate  = plateAt(x, y)
-      const onPlate   = hasBlock && hasPlate
+      const wall = isWall(x, y)
+      const bIdx = boulderIndexAt(x, y)
+      const hasBlock = bIdx >= 0
+      const hasPlate = plateAt(x, y)
+      const onPlate = hasBlock && hasPlate
 
       let bg = 'linear-gradient(135deg, #1f2937, #111827)'
       let border = '1px solid #374151'
-      if (hasPlate) {
+      if (wall) {
+        bg = 'linear-gradient(135deg, #44403c, #292524)'
+        border = '1px solid #78716c'
+      } else if (hasPlate) {
         bg = onPlate
           ? 'linear-gradient(135deg, #14532d, #064e3b)'
           : 'linear-gradient(135deg, #1a3d26, #14301e)'
@@ -127,37 +179,36 @@ export default function BoulderGame({ onComplete, onAbort }) {
       }
 
       let label = ''
-      if (isPlayer)       label = '🏃'
+      if (wall)           label = '🧱'
       else if (onPlate)   label = '🟢'
       else if (hasBlock)  label = '🗿'
       else if (hasPlate)  label = '🎯'
 
-      cols.push(
+      cells.push(
         <div key={`${x},${y}`} style={{
-          aspectRatio: '1/1',
+          gridColumn: x + 1,
+          gridRow: SIZE - y,
           background: bg, border, borderRadius: 8,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 30,
-          boxShadow: isPlayer ? '0 0 12px rgba(250,204,21,0.6)' : 'inset 0 -2px 4px rgba(0,0,0,0.3)',
+          fontSize: 26,
+          boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.3)',
           transition: 'all 0.15s',
         }}>
           {label}
         </div>
       )
     }
-    rows.push(
-      <div key={y} style={{ display: 'grid', gridTemplateColumns: `repeat(${SIZE}, 1fr)`, gap: 4 }}>
-        {cols}
-      </div>
-    )
   }
+
+  const visualRow = SIZE - 1 - player.y
+  const visualCol = player.x
 
   const btnStyle = {
     background: 'linear-gradient(135deg, #334155, #1e293b)',
     border: '1px solid #475569',
     borderRadius: 12, color: '#e5e7eb',
-    fontSize: 24, fontWeight: 800,
-    width: 60, height: 60,
+    fontSize: 22, fontWeight: 800,
+    width: 54, height: 54,
     cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     userSelect: 'none',
@@ -176,17 +227,17 @@ export default function BoulderGame({ onComplete, onAbort }) {
       </div>
 
       <div style={{
-        margin: '12px 14px', padding: '10px 12px',
+        margin: '10px 14px', padding: '10px 12px',
         background: '#102118', border: '1px solid #166534', borderRadius: 10,
         fontSize: 12, color: '#86efac', lineHeight: 1.5,
       }}>
-        Duw alle <strong style={{ color: '#fbbf24' }}>🗿 blokken</strong> op de
-        <strong style={{ color: '#4ade80' }}> 🎯 drukplaten</strong>. Beweeg met de pijl-knoppen.
-        Een blok kan niet door muren of andere blokken. Zit je vast? <strong>🔄 Reset</strong>.
+        Duw alle <strong style={{ color: '#fbbf24' }}>🗿 3 blokken</strong> op de
+        <strong style={{ color: '#4ade80' }}> 🎯 drukplaten</strong>. <strong style={{ color: '#d6d3d1' }}>🧱 Muren</strong>
+        blokkeren blokken en speler. Vast? Gebruik <strong>↶ Undo</strong> of <strong>🔄 Reset</strong>.
       </div>
 
       <div style={{
-        display: 'flex', gap: 12, margin: '0 14px 12px', padding: '8px 12px',
+        display: 'flex', gap: 12, margin: '0 14px 10px', padding: '8px 12px',
         background: '#0f1f1a', borderRadius: 10, border: '1px solid #166534',
         fontSize: 13, fontWeight: 700, color: '#86efac',
       }}>
@@ -194,22 +245,55 @@ export default function BoulderGame({ onComplete, onAbort }) {
         <span style={{ marginLeft: 'auto' }}>Zetten: {moves}</span>
       </div>
 
-      {/* Grid */}
-      <div style={{
-        padding: '0 14px',
-        maxWidth: 360, margin: '0 auto', width: '100%',
-        display: 'flex', flexDirection: 'column', gap: 4,
-      }}>
-        {rows}
+      {/* Grid + sprite */}
+      <div style={{ padding: '0 14px' }}>
+        <div style={{
+          '--cell': 'min(52px, 14vw)',
+          '--gap': '4px',
+          display: 'grid',
+          gridTemplateColumns: `repeat(${SIZE}, var(--cell))`,
+          gridTemplateRows: `repeat(${SIZE}, var(--cell))`,
+          gap: 'var(--gap)',
+          justifyContent: 'center',
+          margin: '0 auto',
+          position: 'relative',
+        }}>
+          {cells}
+
+          {/* Sprite overlay */}
+          <div style={{
+            position: 'absolute',
+            left: 0, top: 0,
+            width: 'var(--cell)', height: 'var(--cell)',
+            transform: `translate(calc(${visualCol} * (var(--cell) + var(--gap))), calc(${visualRow} * (var(--cell) + var(--gap))))`,
+            transition: `transform ${STEP_MS}ms linear`,
+            pointerEvents: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 10,
+          }}>
+            <div style={{
+              width: '78%', height: '78%',
+              borderRadius: '50%',
+              background: `radial-gradient(circle, ${teamColor}66 0%, ${teamColor}22 60%, transparent 100%)`,
+              border: `2px solid ${teamColor}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 22,
+              boxShadow: `0 0 10px ${teamColor}aa`,
+              animation: moving ? 'bokePulse 0.5s ease-in-out infinite' : 'none',
+            }}>
+              {sprite}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* D-pad */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18, userSelect: 'none' }}>
+      {/* D-pad + controls */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14, gap: 14, userSelect: 'none' }}>
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 60px)',
-          gridTemplateRows: 'repeat(3, 60px)',
-          gap: 6,
+          gridTemplateColumns: 'repeat(3, 54px)',
+          gridTemplateRows: 'repeat(3, 54px)',
+          gap: 5,
         }}>
           <div />
           <button style={done ? btnDisabled : btnStyle} onClick={() => move('up')} disabled={done} aria-label="omhoog">▲</button>
@@ -219,7 +303,7 @@ export default function BoulderGame({ onComplete, onAbort }) {
             style={{
               ...btnStyle,
               background: 'linear-gradient(135deg, #7f1d1d, #450a0a)',
-              border: '1px solid #b91c1c', color: '#fca5a5', fontSize: 18,
+              border: '1px solid #b91c1c', color: '#fca5a5', fontSize: 16,
               opacity: done ? 0.4 : 1, cursor: done ? 'default' : 'pointer',
             }}
             onClick={reset} disabled={done} aria-label="reset"
@@ -229,11 +313,30 @@ export default function BoulderGame({ onComplete, onAbort }) {
           <button style={done ? btnDisabled : btnStyle} onClick={() => move('down')} disabled={done} aria-label="omlaag">▼</button>
           <div />
         </div>
+
+        {/* Undo kolom */}
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <button
+            style={{
+              ...btnStyle,
+              background: 'linear-gradient(135deg, #78350f, #451a03)',
+              border: '1px solid #d97706', color: '#fbbf24',
+              width: 72, height: 54, fontSize: 16,
+              opacity: (done || history.length === 0) ? 0.4 : 1,
+              cursor: (done || history.length === 0) ? 'default' : 'pointer',
+            }}
+            onClick={undo}
+            disabled={done || history.length === 0}
+            aria-label="undo"
+          >
+            ↶ Undo
+          </button>
+        </div>
       </div>
 
       {done && (
         <div style={{
-          textAlign: 'center', padding: 18, fontSize: 22, fontWeight: 800, color: '#4ade80',
+          textAlign: 'center', padding: 16, fontSize: 22, fontWeight: 800, color: '#4ade80',
           animation: 'bokePulse 0.8s ease-in-out infinite',
         }}>
           🔓 De kluis gaat open!
