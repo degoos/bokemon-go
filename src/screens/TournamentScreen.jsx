@@ -93,7 +93,7 @@ function LevelBadge({ index }) {
 // TournamentScreen
 // ────────────────────────────────────────────────────────────
 export default function TournamentScreen({
-  session, sessionId, teams, players, catches,
+  session, sessionId, teams, players, catches: propCatches,
   player, team, isAdmin, onClose, onStartFinale,
 }) {
   const [state, setState] = useState(null)           // tournament_state rij
@@ -104,6 +104,31 @@ export default function TournamentScreen({
   const [confirming, setConfirming] = useState(false)
   const [advancing, setAdvancing] = useState(false)
   const [activeGymView, setActiveGymView] = useState('rules') // 'rules' | 'draft' | 'reveal' | 'duels' voor tab
+
+  // ── Eigen live catches-state (onafhankelijk van prop) ─────────
+  // De prop-catches via useGameSession kunnen stale zijn als de catches-tabel
+  // niet in Supabase realtime publication zit. Daarom fetchen we hier zelf.
+  const [liveCatches, setLiveCatches] = useState(propCatches || [])
+  useEffect(() => {
+    if (!sessionId) return
+    let active = true
+    async function loadCatches() {
+      const { data } = await supabase
+        .from('catches')
+        .select('*, pokemon_definitions(*), teams(name,color)')
+        .eq('game_session_id', sessionId)
+      if (active && data) setLiveCatches(data)
+    }
+    loadCatches()
+    const ch = supabase.channel(`tournament-catches-${sessionId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'catches',
+        filter: `game_session_id=eq.${sessionId}`,
+      }, () => loadCatches())
+      .subscribe()
+    return () => { active = false; supabase.removeChannel(ch) }
+  }, [sessionId])
+  const catches = liveCatches
 
   const gym = TOURNAMENT_GYMS[state?.current_gym ?? 0]
   const gymPhase = state?.gym_phase ?? 'intro'
@@ -353,8 +378,8 @@ export default function TournamentScreen({
           </div>
         </div>
 
-        {/* Admin: start draft */}
-        {isAdmin && (
+        {/* Admin: start draft — Spelers: wachtboodschap */}
+        {isAdmin ? (
           <div style={{ padding: 16, borderTop: '1px solid #1e293b' }}>
             <button
               onClick={() => advancePhase('draft')}
@@ -363,6 +388,24 @@ export default function TournamentScreen({
             >
               {advancing ? 'Bezig…' : '📋 Start Draft →'}
             </button>
+          </div>
+        ) : (
+          <div style={{ padding: 16, borderTop: '1px solid #1e293b' }}>
+            <div style={{
+              background: '#1e293b',
+              border: '1px solid #334155',
+              borderRadius: 12,
+              padding: 14,
+              textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 22, marginBottom: 4 }}>⏳</div>
+              <div style={{ fontWeight: 800, color: '#e2e8f0', fontSize: 14 }}>
+                Wacht tot Team Rocket de draft start…
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                Daarna kiezen jullie per niveau een trainer + Bokémon.
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -380,9 +423,29 @@ export default function TournamentScreen({
     const myPlayers = players.filter(p => p.team_id === team?.id)
     const myCatches = catches.filter(c => c.team_id === team?.id)
 
+    // Debug info
+    const debugInfo = {
+      teamId: team?.id,
+      teamName: team?.name,
+      totalCatches: catches.length,
+      myCatches: myCatches.length,
+      totalPlayers: players.length,
+      myPlayers: myPlayers.length,
+      sampleCatch: catches[0] ? { id: catches[0].id, team_id: catches[0].team_id, pokemon: catches[0].pokemon_definitions?.name } : null,
+    }
+
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f172a' }}>
         <Header onClose={onClose} title={g.naam} subtitle="Draft — kies jouw opstelling" emoji="📋" />
+
+        {/* 🐛 DEBUG — kan weg na test */}
+        <div style={{
+          background: '#0c1a2e', border: '1px dashed #fbbf24', padding: 10,
+          fontSize: 11, color: '#fbbf24', fontFamily: 'monospace', whiteSpace: 'pre-wrap',
+          margin: 8, borderRadius: 6,
+        }}>
+          🐛 DEBUG{'\n'}{JSON.stringify(debugInfo, null, 2)}
+        </div>
 
         {myConfirmed ? (
           <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
